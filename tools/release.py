@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -12,7 +13,7 @@ import sys
 import tarfile
 from pathlib import Path
 
-from privacy_check import scan_repository
+from privacy_check import private_terms_from_environment, scan_repository
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,9 +105,30 @@ def main() -> int:
         if previous_parsed is not None and parsed <= previous_parsed:
             raise RuntimeError("the release version must increase")
         notes = _release_notes(current)
-        findings = scan_repository(ROOT, extra_texts={"release notes": notes})
+        terms = private_terms_from_environment()
+        findings = scan_repository(
+            ROOT, terms, extra_texts={"release notes": notes}
+        )
         if findings:
             raise RuntimeError("privacy check failed before release publication")
+        policy = json.loads((ROOT / "sync-policy.json").read_text(encoding="utf-8"))
+        release_policy = policy.get("release_policy")
+        if release_policy not in {"manual", "auto"}:
+            raise RuntimeError("the configured release policy is not recognized")
+        event_name = os.environ.get("GITHUB_EVENT_NAME")
+        if event_name == "push" and release_policy != "auto":
+            print("automatic release publication is disabled by policy")
+            return 0
+        if event_name not in {"push", "workflow_dispatch"}:
+            raise RuntimeError("release publication requires a GitHub release event")
+        branch = _run(["git", "branch", "--show-current"])
+        if branch != "main":
+            raise RuntimeError("release publication requires the main branch")
+        target = os.environ.get("GITHUB_SHA") or _run(
+            ["git", "rev-parse", "HEAD"]
+        )
+        if not re.fullmatch(r"[0-9a-fA-F]{40,64}", target):
+            raise RuntimeError("the release target is not a commit SHA")
         archive, script, sums = _build_assets(current)
         tag = f"v{current}"
         title = f"Harklight for Tightbeam {tag}"
@@ -124,7 +146,7 @@ def main() -> int:
                 "--notes",
                 notes,
                 "--target",
-                "HEAD",
+                target,
             ]
         )
         print(f"published versioned pack release {tag}")

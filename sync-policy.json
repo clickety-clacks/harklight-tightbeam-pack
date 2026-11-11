@@ -1,3 +1,4 @@
 {
-  "publish_policy": "review"
+  "publish_policy": "review",
+  "release_policy": "manual"
 }

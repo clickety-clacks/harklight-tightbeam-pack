@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "bin"))
 
 import harklight_pack
 import privacy_check
+import release as release_tool
 import sync_from_installation
 
 
@@ -27,7 +28,6 @@ class PrivacyCheckTests(unittest.TestCase):
             "sample",
             "A note contains private-sentinel-term and alpha" + "@example.com",
             ["private-sentinel-term"],
-            set(),
         )
         self.assertIn("sample: configured private term", findings)
         self.assertIn("sample: possible email address", findings)
@@ -37,7 +37,7 @@ class PrivacyCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "notes.md").write_text(
-                "A note about Unlistedplace.\n", encoding="utf-8"
+                "A note about Unlistedplace Harbor.\n", encoding="utf-8"
             )
             findings = privacy_check.scan_repository(root)
         self.assertIn("notes.md: unrecognized proper noun", findings)
@@ -54,6 +54,54 @@ class PrivacyCheckTests(unittest.TestCase):
         embedded = privacy_check.text_findings("sample", "concatenate values", ["cat"])
         self.assertIn("sample: configured private term", whole)
         self.assertNotIn("sample: configured private term", embedded)
+
+    def test_private_names_match_at_line_start_bullet_and_after_period(self) -> None:
+        findings = privacy_check.text_findings(
+            "sample",
+            "OperatorProbe approves releases.\n- operatorprobe approves releases.\n"
+            "The operator. MACHINEPROBE hosts the gateway.",
+            ["OperatorProbe", "MachineProbe"],
+        )
+        self.assertIn("sample: configured private term", findings)
+
+    def test_unrecognized_names_match_at_line_start_bullet_and_after_period(self) -> None:
+        findings = privacy_check.text_findings(
+            "sample",
+            "Zephyria Sable approves releases.\n- Zephyria Sable approves releases.\n"
+            "The operator. Zephyria Sable hosts the gateway.",
+        )
+        self.assertIn("sample: unrecognized proper noun", findings)
+
+    def test_ci_private_terms_fail_closed_and_require_categories(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(ValueError):
+                privacy_check.private_terms_from_environment()
+        with patch.dict(
+            os.environ,
+            {"HARKLIGHT_PACK_PRIVATE_TERMS": "machine|privatehost\nperson|privateperson"},
+            clear=True,
+        ):
+            with self.assertRaises(ValueError):
+                privacy_check.private_terms_from_environment()
+        with patch.dict(
+            os.environ,
+            {
+                "HARKLIGHT_PACK_PRIVATE_TERMS": (
+                    "machine|privatehost\nperson|privateperson\nuser|privateuser"
+                )
+            },
+            clear=True,
+        ):
+            self.assertEqual(
+                privacy_check.private_terms_from_environment(),
+                ["privatehost", "privateperson", "privateuser"],
+            )
+
+    def test_ci_command_refuses_when_private_terms_are_absent(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            sys, "argv", ["privacy_check.py", "--ci"]
+        ):
+            self.assertEqual(privacy_check.main(), 2)
 
 
 class SourceSyncTests(unittest.TestCase):
@@ -106,6 +154,81 @@ class SourceSyncTests(unittest.TestCase):
             ):
                 with self.assertRaises(sync_from_installation.SyncError):
                     sync_from_installation.generate(copied)
+
+    def test_next_sync_rebases_from_main_after_squash_merge(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            remote = root / "remote.git"
+            repo = root / "repo"
+
+            def git(*args: str, cwd: Path = repo) -> str:
+                result = __import__("subprocess").run(
+                    ["git", *args],
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    raise AssertionError("scratch git operation failed")
+                return result.stdout.strip()
+
+            git("init", "--bare", str(remote), cwd=root)
+            git("init", "--initial-branch=main", str(repo), cwd=root)
+            git("config", "user.name", "Pack Test")
+            git("config", "user.email", "pack-test" + "@example.invalid")
+            (repo / "pack.txt").write_text("base\n", encoding="utf-8")
+            git("add", "pack.txt")
+            git("commit", "-m", "base")
+            git("remote", "add", "origin", str(remote))
+            git("push", "-u", "origin", "main")
+
+            git("checkout", "-b", sync_from_installation.SYNC_BRANCH)
+            (repo / "pack.txt").write_text("merged pack content\n", encoding="utf-8")
+            git("commit", "-am", "first sync")
+            git("push", "-u", "origin", sync_from_installation.SYNC_BRANCH)
+            stale_sync = git("rev-parse", "HEAD")
+
+            git("checkout", "main")
+            (repo / "pack.txt").write_text("merged pack content\n", encoding="utf-8")
+            git("commit", "-am", "squash merge")
+            git("push", "origin", "main")
+            main_tip = git("rev-parse", "HEAD")
+            git("checkout", sync_from_installation.SYNC_BRANCH)
+
+            def run_command(args: list[str], cwd: Path | None = None, capture: bool = True) -> str:
+                if args[:2] == ["gh", "pr"]:
+                    return "[]"
+                result = __import__("subprocess").run(
+                    args,
+                    cwd=cwd or repo,
+                    capture_output=capture,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    raise sync_from_installation.SyncError("scratch git operation failed")
+                return result.stdout.strip() if capture else ""
+
+            with patch.object(sync_from_installation, "ROOT", repo), patch.object(
+                sync_from_installation, "_run", side_effect=run_command
+            ):
+                open_pr_exists, expected_remote = sync_from_installation._open_sync_pr()
+                self.assertFalse(open_pr_exists)
+                self.assertEqual(expected_remote, stale_sync)
+                self.assertEqual(git("rev-parse", "HEAD"), main_tip)
+                (repo / "pack.txt").write_text("next sync content\n", encoding="utf-8")
+                git("commit", "-am", "second sync")
+                sync_from_installation._push_sync_branch(open_pr_exists, expected_remote)
+
+            remote_sync = git(
+                "ls-remote", "--heads", "origin", sync_from_installation.SYNC_BRANCH
+            ).split()[0]
+            self.assertEqual(remote_sync, git("rev-parse", "HEAD"))
+            self.assertEqual(
+                git("merge-base", "origin/main", sync_from_installation.SYNC_BRANCH),
+                main_tip,
+            )
 
 
 class ApplyTests(unittest.TestCase):
@@ -201,6 +324,62 @@ class ApplyTests(unittest.TestCase):
 
 
 class ReleaseFetchTests(unittest.TestCase):
+    def test_release_targets_the_workflow_commit_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+            (root / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
+            (root / "sync-policy.json").write_text(
+                '{"publish_policy":"review","release_policy":"manual"}\n',
+                encoding="utf-8",
+            )
+            assets = [root / name for name in ("archive.tgz", "script.py", "sums")]
+            commands: list[list[str]] = []
+            target = "a" * 40
+
+            def fake_run(args: list[str]) -> str:
+                commands.append(args)
+                return "main" if args[:3] == ["git", "branch", "--show-current"] else ""
+
+            with (
+                patch.object(release_tool, "ROOT", root),
+                patch.object(release_tool, "_previous_version", return_value="0.9.0"),
+                patch.object(release_tool, "_release_notes", return_value="Release notes."),
+                patch.object(release_tool, "private_terms_from_environment", return_value=[]),
+                patch.object(release_tool, "scan_repository", return_value=[]),
+                patch.object(release_tool, "_build_assets", return_value=tuple(assets)),
+                patch.object(release_tool, "_run", side_effect=fake_run),
+                patch.dict(
+                    os.environ,
+                    {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_SHA": target},
+                ),
+            ):
+                self.assertEqual(release_tool.main(), 0)
+
+            release_command = next(command for command in commands if command[:3] == ["gh", "release", "create"])
+            self.assertEqual(release_command[release_command.index("--target") + 1], target)
+
+    def test_push_does_not_publish_with_manual_release_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+            (root / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
+            (root / "sync-policy.json").write_text(
+                '{"publish_policy":"review","release_policy":"manual"}\n',
+                encoding="utf-8",
+            )
+            with (
+                patch.object(release_tool, "ROOT", root),
+                patch.object(release_tool, "_previous_version", return_value="0.9.0"),
+                patch.object(release_tool, "_release_notes", return_value="Release notes."),
+                patch.object(release_tool, "private_terms_from_environment", return_value=[]),
+                patch.object(release_tool, "scan_repository", return_value=[]),
+                patch.object(release_tool, "_build_assets") as build_assets,
+                patch.dict(os.environ, {"GITHUB_EVENT_NAME": "push"}),
+            ):
+                self.assertEqual(release_tool.main(), 0)
+            build_assets.assert_not_called()
+
     def test_update_download_checks_archive_checksum(self) -> None:
         archive_buffer = io.BytesIO()
         version = "1.2.3"
