@@ -69,7 +69,9 @@ they apply. The checker fails closed when the secret is missing, malformed,
 or missing a required category. Keep the values out of repository files,
 workflow output, pull request text, and release notes. For a local
 pre-publication check, point HARKLIGHT_PACK_PRIVATE_TERMS_FILE at a private
-file containing one term per line.
+file containing one term per line. Fork pull requests are scanned by the
+trusted base-branch workflow, which reads their files as data without running
+their code or exposing the private-term secret to it.
 
 ## Development
 
