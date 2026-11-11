@@ -184,6 +184,21 @@ class ApplyTests(unittest.TestCase):
             self.assertNotIn("HARKLIGHT_PACK_ELECTED", (identity / "archetypes" / "reviewer.toml").read_text(encoding="utf-8"))
             self.assertIn("harklight-agent", (identity / "archetypes" / "coder.toml").read_text(encoding="utf-8"))
 
+    def test_fresh_identity_can_receive_default_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            identity = Path(temp) / "identity"
+            (identity / "guidance").mkdir(parents=True)
+            (identity / "archetypes").mkdir(parents=True)
+            (identity / "archetypes" / "default.toml").write_text(
+                'name = "default"\nskills = []\n', encoding="utf-8"
+            )
+            changes = harklight_pack._planned_changes(
+                identity, self._make_pack(Path(temp))
+            )
+            guidance = next(content for kind, _, content in changes if kind == "guidance")
+        self.assertIn("BEGIN HARKLIGHT FOR TIGHTBEAM v1.2.3", guidance)
+        self.assertIn("END HARKLIGHT FOR TIGHTBEAM", guidance)
+
 
 class ReleaseFetchTests(unittest.TestCase):
     def test_update_download_checks_archive_checksum(self) -> None:
