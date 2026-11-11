@@ -47,6 +47,9 @@ The sample user service and timer are in systemd/user. They are not enabled
 by the repository. The timer is daily at 04:00 UTC. Configure a private
 terms file outside this repository before enabling sync; it may contain
 organization-only names and addresses and must never be committed.
+The service account also needs read access to the reference identity and a
+GitHub CLI login with push access to this repository. Keep that login outside
+the repository and configure Git to use the GitHub CLI credential helper.
 
 The default publish policy is review: sync opens a pull request and waits.
 Set publish_policy to auto_merge_clean in sync-policy.json only when

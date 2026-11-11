@@ -58,6 +58,9 @@ PUBLIC_NAMES = {
     "Persistent",
     "Install",
     "WantedBy",
+    "Assignment",
+    "Work",
+    "Item",
 }
 COMMON_CAPS = {
     "A",

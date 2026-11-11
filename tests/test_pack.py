@@ -42,6 +42,13 @@ class PrivacyCheckTests(unittest.TestCase):
             findings = privacy_check.scan_repository(root)
         self.assertIn("notes.md: unrecognized proper noun", findings)
 
+    def test_pull_request_memento_labels_are_not_private_names(self) -> None:
+        findings = privacy_check.text_findings(
+            "pull request body",
+            "Tightbeam-Assignment: asg_123\nTightbeam-Work-Item: wi_456",
+        )
+        self.assertNotIn("pull request body: unrecognized proper noun", findings)
+
     def test_private_terms_match_whole_identifiers(self) -> None:
         whole = privacy_check.text_findings("sample", "the cat is here", ["cat"])
         embedded = privacy_check.text_findings("sample", "concatenate values", ["cat"])
