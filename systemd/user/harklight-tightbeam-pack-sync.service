@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync the Harklight for Tightbeam pack from the configured identity
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.local/share/harklight-tightbeam-pack
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+Environment=TIGHTBEAM_BASE_DIR=%h/.tightbeam
+Environment=TIGHTBEAM_IDENTITY_DIR=%h/.tightbeam/identity
+Environment=HARKLIGHT_PACK_PRIVATE_TERMS_FILE=%h/.config/harklight-tightbeam-pack/private-terms.txt
+ExecStart=/usr/bin/python3 %h/.local/share/harklight-tightbeam-pack/tools/sync_from_installation.py --open-pr

@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily source sync for the Harklight for Tightbeam pack
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 UTC
+Persistent=true
+Unit=harklight-tightbeam-pack-sync.service
+
+[Install]
+WantedBy=timers.target
