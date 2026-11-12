@@ -47,11 +47,31 @@ The sample user service and timer are in systemd/user. They are not enabled
 by the repository. The timer is daily at 04:00 UTC. Configure a private
 terms file outside this repository before enabling sync; it may contain
 organization-only names and addresses and must never be committed.
+The service account also needs read access to the reference identity and a
+GitHub CLI login with push access to this repository. Keep that login outside
+the repository and configure Git to use the GitHub CLI credential helper.
 
 The default publish policy is review: sync opens a pull request and waits.
-Set publish_policy to auto_merge_clean in sync-policy.json only when
-automatic merge and release have been chosen for the repository. Both policies
-run the same privacy checks.
+Set publish_policy to auto_merge_clean in sync-policy.json only after
+automatic sync-PR merging has been chosen. Release publication has a separate
+release_policy: it defaults to manual, so a push to main does not publish a
+release. A manual release workflow dispatch on main publishes the reviewed
+version. Automatic publication from a main push requires release_policy to be
+changed to auto. Both paths run the same privacy checks.
+
+## Privacy checks
+
+Configure the repository Actions secret HARKLIGHT_PACK_PRIVATE_TERMS before
+opening sync pull requests. Store one categorized term per line, such as
+machine|<private-machine-name>, person|<private-person-name>, and
+user|<private-user-id>; add email, hostname, path, or other categories when
+they apply. The checker fails closed when the secret is missing, malformed,
+or missing a required category. Keep the values out of repository files,
+workflow output, pull request text, and release notes. For a local
+pre-publication check, point HARKLIGHT_PACK_PRIVATE_TERMS_FILE at a private
+file containing one term per line. Fork pull requests are scanned by the
+trusted base-branch workflow, which reads their files as data without running
+their code or exposing the private-term secret to it.
 
 ## Development
 
@@ -59,12 +79,12 @@ Python 3.11 or newer is required. Run the focused checks with:
 
 ~~~~sh
 python3 -m unittest discover -s tests -v
-python3 tools/privacy_check.py --ci
+HARKLIGHT_PACK_PRIVATE_TERMS_FILE=/path/to/private-terms.txt python3 tools/privacy_check.py
 ~~~~
 
-The release workflow publishes a versioned archive when a reviewed change
-updates VERSION. Release notes and assets pass the privacy check before
-publication.
+The release workflow creates a versioned archive after a reviewed change
+updates VERSION and a release is dispatched on main. Release notes and assets
+pass the privacy check before publication.
 
 ## License
 

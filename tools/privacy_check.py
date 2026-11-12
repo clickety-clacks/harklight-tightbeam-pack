@@ -58,6 +58,9 @@ PUBLIC_NAMES = {
     "Persistent",
     "Install",
     "WantedBy",
+    "Assignment",
+    "Work",
+    "Item",
 }
 COMMON_CAPS = {
     "A",
@@ -67,6 +70,7 @@ COMMON_CAPS = {
     "An",
     "And",
     "Apply",
+    "Add",
     "Automatic",
     "Both",
     "Changes",
@@ -89,7 +93,9 @@ COMMON_CAPS = {
     "Run",
     "Set",
     "Start",
+    "Standalone",
     "Some",
+    "Sync",
     "The",
     "This",
     "To",
@@ -142,21 +148,21 @@ def _extract_ips(text: str) -> list[str]:
     return found
 
 
-def _proper_noun_findings(text: str, known_lower_words: set[str]) -> list[str]:
+def _proper_noun_findings(text: str) -> list[str]:
     findings: list[str] = []
     for line in text.splitlines():
         if line.lstrip().startswith("#"):
             continue
-        for match in re.finditer(r"\b[A-Z][a-z]{2,}\b", line):
-            word = match.group(0)
-            prefix = line[: match.start()]
-            if not prefix.strip() or not prefix.strip(" -*•>0123456789.)"):
+        words = list(re.finditer(r"\b[A-Z][a-z]{2,}\b", line))
+        for first, second in zip(words, words[1:]):
+            gap = line[first.end() : second.start()]
+            if not gap.isspace():
                 continue
-            if prefix.rstrip().endswith((".", "!", "?")):
+            pair = (first.group(0), second.group(0))
+            if all(word in PUBLIC_NAMES or word in COMMON_CAPS for word in pair):
                 continue
-            if word in PUBLIC_NAMES or word in COMMON_CAPS or word.casefold() in known_lower_words:
-                continue
-            findings.append(word)
+            findings.append("unrecognized name")
+            break
     return findings
 
 
@@ -164,7 +170,6 @@ def text_findings(
     label: str,
     text: str,
     private_terms: Iterable[str] = (),
-    known_lower_words: set[str] | None = None,
     check_names: bool = True,
 ) -> list[str]:
     findings: list[str] = []
@@ -185,15 +190,17 @@ def text_findings(
             break
 
     if check_names:
-        lower_words = known_lower_words if known_lower_words is not None else set(
-            re.findall(r"\b[a-z][a-z'-]{2,}\b", text)
-        )
-        if _proper_noun_findings(text, lower_words):
+        if _proper_noun_findings(text):
             findings.append(f"{label}: unrecognized proper noun")
     return findings
 
 
 def _read_text(path: Path) -> str | None:
+    if path.is_symlink():
+        try:
+            return os.readlink(path)
+        except OSError:
+            return None
     try:
         return path.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
@@ -203,17 +210,12 @@ def _read_text(path: Path) -> str | None:
 def _repo_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for path in root.rglob("*"):
-        if not path.is_file() or any(part in SKIP_PARTS for part in path.parts):
+        if (not path.is_file() and not path.is_symlink()) or any(
+            part in SKIP_PARTS for part in path.parts
+        ):
             continue
         files.append(path)
     return sorted(files)
-
-
-def _known_lower_words(texts: Iterable[str]) -> set[str]:
-    words: set[str] = set()
-    for text in texts:
-        words.update(re.findall(r"\b[a-z][a-z'-]{2,}\b", text))
-    return words
 
 
 def _event_texts() -> dict[str, str]:
@@ -222,22 +224,33 @@ def _event_texts() -> dict[str, str]:
     if event_path:
         try:
             event = json.loads(Path(event_path).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {"GitHub event": ""}
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("GitHub event metadata is unavailable") from error
         pull = event.get("pull_request") or {}
         if pull:
             result["pull request title"] = str(pull.get("title") or "")
             result["pull request body"] = str(pull.get("body") or "")
+    revision = os.environ.get("HARKLIGHT_PACK_CI_GIT_REF", "HEAD")
+    if not re.fullmatch(r"(?:HEAD|refs/remotes/scan/[0-9]+)", revision):
+        raise ValueError("CI source revision is invalid")
     try:
         commit_text = subprocess.run(
-            ["git", "log", "-n", "10", "--format=%B"],
+            [
+                "git",
+                "log",
+                "-n",
+                "10",
+                "--format=%B",
+                "--end-of-options",
+                revision,
+            ],
             cwd=ROOT,
             check=True,
             capture_output=True,
             text=True,
         ).stdout
-    except (OSError, subprocess.CalledProcessError):
-        commit_text = ""
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ValueError("CI commit messages are unavailable") from error
     if commit_text:
         result["recent commit messages"] = commit_text
     return result
@@ -255,9 +268,6 @@ def scan_repository(
         if text is not None:
             texts.append((path.relative_to(root).as_posix(), text))
     additional = list((extra_texts or {}).items())
-    lower_words = _known_lower_words(
-        [text for _, text in texts] + [text for _, text in additional]
-    )
     findings: list[str] = []
     terms = tuple(private_terms)
     for label, text in texts:
@@ -267,7 +277,6 @@ def scan_repository(
                 label,
                 text,
                 terms,
-                lower_words,
                 check_names=(
                     label.startswith("pack/")
                     or suffix in {
@@ -285,7 +294,7 @@ def scan_repository(
             )
         )
     for label, text in additional:
-        findings.extend(text_findings(label, text, terms, lower_words))
+        findings.extend(text_findings(label, text, terms))
     return sorted(set(findings))
 
 
@@ -301,6 +310,43 @@ def read_private_terms(path: Path | None) -> list[str]:
     ]
 
 
+CI_PRIVATE_CATEGORIES = {"machine", "person", "user"}
+CI_ALLOWED_CATEGORIES = CI_PRIVATE_CATEGORIES | {
+    "email",
+    "hostname",
+    "path",
+    "other",
+}
+
+
+def private_terms_from_environment() -> list[str]:
+    """Read categorized private terms without exposing their values in diagnostics."""
+    raw = os.environ.get("HARKLIGHT_PACK_PRIVATE_TERMS", "")
+    if not raw.strip():
+        raise ValueError("CI private-term configuration is unavailable")
+    values: list[str] = []
+    categories: set[str] = set()
+    for line in raw.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        category, separator, value = line.partition("|")
+        category = category.strip().casefold()
+        value = value.strip()
+        if (
+            not separator
+            or category not in CI_ALLOWED_CATEGORIES
+            or len(value) < 3
+            or "\n" in value
+        ):
+            raise ValueError("CI private-term configuration is malformed")
+        categories.add(category)
+        values.append(value)
+    missing = CI_PRIVATE_CATEGORIES - categories
+    if missing:
+        raise ValueError("CI private-term categories are incomplete")
+    return values
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=ROOT)
@@ -308,16 +354,27 @@ def main() -> int:
     parser.add_argument("--private-terms", type=Path)
     args = parser.parse_args()
     terms_path = args.private_terms
-    if terms_path is None and not args.ci:
-        configured = os.environ.get("HARKLIGHT_PACK_PRIVATE_TERMS_FILE")
-        if configured:
-            terms_path = Path(configured)
+    if args.ci:
+        try:
+            terms = private_terms_from_environment()
+        except ValueError as error:
+            print(f"privacy check refused: {error}", file=sys.stderr)
+            return 2
+    else:
+        if terms_path is None:
+            configured = os.environ.get("HARKLIGHT_PACK_PRIVATE_TERMS_FILE")
+            if configured:
+                terms_path = Path(configured)
+        try:
+            terms = read_private_terms(terms_path)
+        except (OSError, ValueError) as error:
+            print(f"privacy check refused: {error}", file=sys.stderr)
+            return 2
     try:
-        terms = read_private_terms(terms_path)
-    except (OSError, ValueError) as error:
+        extra = _event_texts() if args.ci else {}
+    except ValueError as error:
         print(f"privacy check refused: {error}", file=sys.stderr)
         return 2
-    extra = _event_texts() if args.ci else {}
     findings = scan_repository(args.root.resolve(), terms, extra)
     if findings:
         print("privacy check failed:")

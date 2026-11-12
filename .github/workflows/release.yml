@@ -10,6 +10,7 @@ on:
       - bin/harklight_pack.py
       - tools/release.py
       - tools/privacy_check.py
+      - sync-policy.json
   workflow_dispatch:
 
 permissions:
@@ -26,8 +27,11 @@ jobs:
         with:
           python-version: "3.12"
       - name: Check public files and release notes
+        env:
+          HARKLIGHT_PACK_PRIVATE_TERMS: ${{ secrets.HARKLIGHT_PACK_PRIVATE_TERMS }}
         run: python3 tools/privacy_check.py --ci
       - name: Publish versioned archive
         env:
           GH_TOKEN: ${{ github.token }}
+          HARKLIGHT_PACK_PRIVATE_TERMS: ${{ secrets.HARKLIGHT_PACK_PRIVATE_TERMS }}
         run: python3 tools/release.py

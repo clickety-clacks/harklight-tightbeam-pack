@@ -2,19 +2,44 @@ name: Public repository privacy
 
 on:
   pull_request:
+  pull_request_target:
   push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   privacy:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Fetch pull request content as data
+        if: github.event_name == 'pull_request_target'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "privacy check refused: invalid pull request reference" >&2
+            exit 2
+          fi
+          ref="refs/remotes/scan/$PR_NUMBER"
+          git fetch --no-tags origin "refs/pull/$PR_NUMBER/head:$ref"
+          candidate="$RUNNER_TEMP/harklight-pack-pr"
+          mkdir -p "$candidate"
+          git archive "$ref" | tar -x -C "$candidate"
+          printf 'HARKLIGHT_PACK_CI_GIT_REF=%s\n' "$ref" >> "$GITHUB_ENV"
+          printf 'HARKLIGHT_PACK_CANDIDATE_ROOT=%s\n' "$candidate" >> "$GITHUB_ENV"
       - name: Check public files and publication text
-        run: python3 tools/privacy_check.py --ci
+        env:
+          HARKLIGHT_PACK_PRIVATE_TERMS: ${{ secrets.HARKLIGHT_PACK_PRIVATE_TERMS }}
+        run: >-
+          python3 tools/privacy_check.py --ci
+          --root "${HARKLIGHT_PACK_CANDIDATE_ROOT:-.}"

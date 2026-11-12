@@ -397,7 +397,11 @@ def generate(identity_root: Path) -> tuple[dict[Path, str], list[str]]:
     return files, source_private_terms(identity_root, operators, hosts)
 
 
-def _run(args: list[str], cwd: Path = ROOT, capture: bool = True) -> str:
+def _run(
+    args: list[str], cwd: Path | None = None, capture: bool = True
+) -> str:
+    if cwd is None:
+        cwd = ROOT
     result = subprocess.run(
         args,
         cwd=cwd,
@@ -454,7 +458,41 @@ def _read_remote_text(path: str, fallback: str = "") -> str:
     return result.stdout if result.returncode == 0 else fallback
 
 
-def _open_sync_pr() -> None:
+def _list_sync_prs() -> list[dict[str, object]]:
+    return json.loads(
+        _run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--state",
+                "open",
+                "--head",
+                SYNC_BRANCH,
+                "--json",
+                "number,url,title",
+            ]
+        )
+    )
+
+
+def _remote_sync_branch_oid() -> str | None:
+    result = subprocess.run(
+        ["git", "ls-remote", "--heads", "origin", f"refs/heads/{SYNC_BRANCH}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SyncError("the remote sync branch could not be inspected")
+    lines = [line.split()[0] for line in result.stdout.splitlines() if line.split()]
+    if len(lines) > 1:
+        raise SyncError("the remote sync branch reference is ambiguous")
+    return lines[0] if lines else None
+
+
+def _open_sync_pr() -> tuple[bool, str | None]:
     start_status = _run(["git", "status", "--porcelain"])
     if start_status:
         raise SyncError("the repository working tree must be clean before sync")
@@ -462,41 +500,36 @@ def _open_sync_pr() -> None:
     if branch not in {"main", SYNC_BRANCH}:
         raise SyncError("the sync job is running from an unexpected branch")
     _run(["git", "fetch", "origin", "main"])
+    open_prs = _list_sync_prs()
+    if open_prs:
+        _run(["git", "fetch", "origin", SYNC_BRANCH])
+        _run(["git", "checkout", "-B", SYNC_BRANCH, f"origin/{SYNC_BRANCH}"])
+        return True, None
+
+    # A merged or closed PR leaves the reserved remote branch behind. Start the
+    # next sync at the current main tip and replace that stale branch only if
+    # it still has the exact object observed here.
     if branch == SYNC_BRANCH:
-        remote_branch = subprocess.run(
-            ["git", "fetch", "origin", SYNC_BRANCH],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if remote_branch.returncode == 0:
-            _run(["git", "reset", "--hard", f"origin/{SYNC_BRANCH}"])
-        else:
-            _run(["git", "checkout", "main"])
-            branch = "main"
-    if branch == "main":
-        _run(["git", "merge", "--ff-only", "origin/main"])
-        open_prs = json.loads(
-            _run(
-                [
-                    "gh",
-                    "pr",
-                    "list",
-                    "--state",
-                    "open",
-                    "--head",
-                    SYNC_BRANCH,
-                    "--json",
-                    "number,url,title",
-                ]
+        _run(["git", "checkout", "main"])
+    _run(["git", "merge", "--ff-only", "origin/main"])
+    expected_remote = _remote_sync_branch_oid()
+    _run(["git", "checkout", "-B", SYNC_BRANCH, "origin/main"])
+    return False, expected_remote
+
+
+def _push_sync_branch(open_pr_exists: bool, expected_remote: str | None) -> None:
+    command = ["git", "push"]
+    if open_pr_exists:
+        command.append("--set-upstream")
+        command.extend(["origin", SYNC_BRANCH])
+    else:
+        if expected_remote:
+            command.append(
+                f"--force-with-lease=refs/heads/{SYNC_BRANCH}:{expected_remote}"
             )
-        )
-        if open_prs:
-            _run(["git", "fetch", "origin", SYNC_BRANCH])
-            _run(["git", "checkout", "-B", SYNC_BRANCH, f"origin/{SYNC_BRANCH}"])
-        else:
-            _run(["git", "checkout", "-B", SYNC_BRANCH, "origin/main"])
+        command.append("--set-upstream")
+        command.extend(["origin", SYNC_BRANCH])
+    _run(command)
 
 
 def _publication_text() -> dict[str, str]:
@@ -508,7 +541,7 @@ def _publication_text() -> dict[str, str]:
 
 
 def _publish(files: dict[Path, str], private_terms: list[str], auto_merge: bool) -> None:
-    _open_sync_pr()
+    open_pr_exists, expected_remote = _open_sync_pr()
     before = {path: path.read_bytes() if path.exists() else None for path in files}
     for path, content in files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -553,15 +586,9 @@ def _publish(files: dict[Path, str], private_terms: list[str], auto_merge: bool)
     )
     if commit.returncode != 0:
         raise SyncError("the sync commit could not be created")
-    push = subprocess.run(
-        ["git", "push", "--set-upstream", "origin", SYNC_BRANCH],
-        cwd=ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if push.returncode != 0:
+    try:
+        _push_sync_branch(open_pr_exists, expected_remote)
+    except SyncError:
         raise SyncError("the sync branch could not be pushed")
 
     open_prs = json.loads(

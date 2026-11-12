@@ -324,7 +324,7 @@ def _toml_roles(identity: Path) -> dict[str, Path]:
 def _managed_guidance(identity: Path, pack: Pack) -> tuple[Path, str]:
     path = identity / "guidance" / "default.md"
     try:
-        existing = path.read_text(encoding="utf-8")
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
     except OSError as error:
         raise ApplyError("the default guidance file cannot be read") from error
     return path, _replace_guidance(existing, _guidance_block(pack.guidance, pack.version))
@@ -341,7 +341,9 @@ def _planned_changes(identity: Path, pack: Pack) -> list[tuple[str, Path, str]]:
 
     guidance_path, guidance = _managed_guidance(identity, pack)
     try:
-        current_guidance = guidance_path.read_text(encoding="utf-8")
+        current_guidance = (
+            guidance_path.read_text(encoding="utf-8") if guidance_path.exists() else ""
+        )
     except OSError as error:
         raise ApplyError("the default guidance file cannot be read") from error
     if guidance != current_guidance:

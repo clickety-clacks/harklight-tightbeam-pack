@@ -1,0 +1,19 @@
+{
+  "roles": [
+    "coder",
+    "default",
+    "executive",
+    "guidance-reviewer",
+    "guidance-writer",
+    "integrator",
+    "orchestrator",
+    "pdo",
+    "product-owner",
+    "recon",
+    "reviewer",
+    "reviewer-code",
+    "reviewer-spec",
+    "spec-writer",
+    "team-planner"
+  ]
+}
