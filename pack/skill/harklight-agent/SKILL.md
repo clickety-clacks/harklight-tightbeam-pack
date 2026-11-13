@@ -280,7 +280,7 @@ terminal answer or a grant of new authority. Receiving discussion after a
 terminal does not prove that replying is still allowed: the recorded later
 discussion was delivered and acknowledged, but reply was refused because the
 request was closed. Preserve that refusal; do not reopen or send a replacement
-merely to answer it. For a person-authored `answered`
+merely to answer it. For an `answered`
 terminal, reconcile earlier effects before applying its authorized outcome
 at most once, then report its disposition:
 
@@ -294,8 +294,7 @@ Use `applied` only when the effect is established, `refused` when it cannot be
 applied, or `received` when the outcome remains uncertain. If an earlier
 attempt may have taken effect, check it before acting again. Keep the original
 event, request and revision identities. Cleared, expired or superseded
-terminals stop work on that request and are not approval. An agent-authored
-terminal is not the person's choice. Retraction ends the request; do not
+terminals stop work on that request and are not approval. Retraction ends the request; do not
 answer it, report a result or reopen it implicitly.
 
 For received files, inspect each local path and transfer outcome. Transfer

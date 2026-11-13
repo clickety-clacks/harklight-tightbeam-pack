@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.1.1
+
+Refreshed the Harklight skill and operator guidance from the allowlisted reference identity.
+
+
 ## v0.1.0
 
 Refreshed the Harklight skill and operator guidance from the allowlisted reference identity.
