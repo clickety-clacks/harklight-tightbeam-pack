@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,9 @@ GUIDANCE_END = "<!-- END HARKLIGHT FOR TIGHTBEAM -->"
 SKILL_MARKER = "<!-- HARKLIGHT_PACK_MANAGED -->"
 ELECTION_MARKER = "# HARKLIGHT_PACK_ELECTED"
 SYNC_BRANCH = "sync/from-installation"
+PACK_REPOSITORY_URL = (
+    "https://github.com/clickety-clacks/harklight-tightbeam-pack.git"
+)
 PR_TITLE = "Sync Harklight for Tightbeam content"
 PR_BODY = """Refresh the generated Harklight for Tightbeam pack from its
 allowlisted identity sources.
@@ -427,8 +431,8 @@ def _next_version(base: str) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
-def _update_changelog(version: str) -> None:
-    path = ROOT / "CHANGELOG.md"
+def _update_changelog(version: str, repo_root: Path) -> None:
+    path = repo_root / "CHANGELOG.md"
     current = path.read_text(encoding="utf-8")
     heading = f"## v{version}"
     if heading in current:
@@ -447,10 +451,10 @@ def _update_changelog(version: str) -> None:
     path.write_text("".join(lines), encoding="utf-8")
 
 
-def _read_remote_text(path: str, fallback: str = "") -> str:
+def _read_remote_text(repo_root: Path, path: str, fallback: str = "") -> str:
     result = subprocess.run(
         ["git", "show", f"origin/main:{path}"],
-        cwd=ROOT,
+        cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
@@ -458,7 +462,7 @@ def _read_remote_text(path: str, fallback: str = "") -> str:
     return result.stdout if result.returncode == 0 else fallback
 
 
-def _list_sync_prs() -> list[dict[str, object]]:
+def _list_sync_prs(repo_root: Path) -> list[dict[str, object]]:
     return json.loads(
         _run(
             [
@@ -471,15 +475,16 @@ def _list_sync_prs() -> list[dict[str, object]]:
                 SYNC_BRANCH,
                 "--json",
                 "number,url,title",
-            ]
+            ],
+            cwd=repo_root,
         )
     )
 
 
-def _remote_sync_branch_oid() -> str | None:
+def _remote_sync_branch_oid(repo_root: Path) -> str | None:
     result = subprocess.run(
         ["git", "ls-remote", "--heads", "origin", f"refs/heads/{SYNC_BRANCH}"],
-        cwd=ROOT,
+        cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
@@ -492,32 +497,45 @@ def _remote_sync_branch_oid() -> str | None:
     return lines[0] if lines else None
 
 
-def _open_sync_pr() -> tuple[bool, str | None]:
-    start_status = _run(["git", "status", "--porcelain"])
+def _open_sync_pr(repo_root: Path) -> tuple[bool, str | None]:
+    start_status = _run(["git", "status", "--porcelain"], cwd=repo_root)
     if start_status:
         raise SyncError("the repository working tree must be clean before sync")
-    branch = _run(["git", "branch", "--show-current"])
+    branch = _run(["git", "branch", "--show-current"], cwd=repo_root)
     if branch not in {"main", SYNC_BRANCH}:
         raise SyncError("the sync job is running from an unexpected branch")
-    _run(["git", "fetch", "origin", "main"])
-    open_prs = _list_sync_prs()
+    _run(["git", "fetch", "origin", "main"], cwd=repo_root)
+    open_prs = _list_sync_prs(repo_root)
     if open_prs:
-        _run(["git", "fetch", "origin", SYNC_BRANCH])
-        _run(["git", "checkout", "-B", SYNC_BRANCH, f"origin/{SYNC_BRANCH}"])
+        _run(
+            [
+                "git",
+                "fetch",
+                "origin",
+                f"+refs/heads/{SYNC_BRANCH}:refs/remotes/origin/{SYNC_BRANCH}",
+            ],
+            cwd=repo_root,
+        )
+        _run(
+            ["git", "checkout", "-B", SYNC_BRANCH, f"origin/{SYNC_BRANCH}"],
+            cwd=repo_root,
+        )
         return True, None
 
     # A merged or closed PR leaves the reserved remote branch behind. Start the
     # next sync at the current main tip and replace that stale branch only if
     # it still has the exact object observed here.
     if branch == SYNC_BRANCH:
-        _run(["git", "checkout", "main"])
-    _run(["git", "merge", "--ff-only", "origin/main"])
-    expected_remote = _remote_sync_branch_oid()
-    _run(["git", "checkout", "-B", SYNC_BRANCH, "origin/main"])
+        _run(["git", "checkout", "main"], cwd=repo_root)
+    _run(["git", "merge", "--ff-only", "origin/main"], cwd=repo_root)
+    expected_remote = _remote_sync_branch_oid(repo_root)
+    _run(["git", "checkout", "-B", SYNC_BRANCH, "origin/main"], cwd=repo_root)
     return False, expected_remote
 
 
-def _push_sync_branch(open_pr_exists: bool, expected_remote: str | None) -> None:
+def _push_sync_branch(
+    repo_root: Path, open_pr_exists: bool, expected_remote: str | None
+) -> None:
     command = ["git", "push"]
     if open_pr_exists:
         command.append("--set-upstream")
@@ -529,7 +547,7 @@ def _push_sync_branch(open_pr_exists: bool, expected_remote: str | None) -> None
             )
         command.append("--set-upstream")
         command.extend(["origin", SYNC_BRANCH])
-    _run(command)
+    _run(command, cwd=repo_root)
 
 
 def _publication_text() -> dict[str, str]:
@@ -541,33 +559,63 @@ def _publication_text() -> dict[str, str]:
 
 
 def _publish(files: dict[Path, str], private_terms: list[str], auto_merge: bool) -> None:
-    open_pr_exists, expected_remote = _open_sync_pr()
-    before = {path: path.read_bytes() if path.exists() else None for path in files}
-    for path, content in files.items():
+    with tempfile.TemporaryDirectory(prefix="harklight-pack-sync-") as temporary:
+        temporary_root = Path(temporary)
+        repo_root = temporary_root / "repo"
+        _run(
+            [
+                "git",
+                "clone",
+                "--single-branch",
+                "--branch",
+                "main",
+                PACK_REPOSITORY_URL,
+                str(repo_root),
+            ],
+            cwd=temporary_root,
+        )
+        _publish_in_checkout(repo_root, files, private_terms, auto_merge)
+
+
+def _publish_in_checkout(
+    repo_root: Path,
+    files: dict[Path, str],
+    private_terms: list[str],
+    auto_merge: bool,
+) -> None:
+    open_pr_exists, expected_remote = _open_sync_pr(repo_root)
+    checkout_files = {
+        repo_root / path.relative_to(ROOT): content for path, content in files.items()
+    }
+    before = {
+        path: path.read_bytes() if path.exists() else None
+        for path in checkout_files
+    }
+    for path, content in checkout_files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
     changed = any(
         before[path] != path.read_bytes()
-        for path in files
+        for path in checkout_files
     )
     if not changed:
         print("reference sources match the open pack; no pull request update")
         return
 
-    base_version = _read_remote_text("VERSION", "0.0.0-dev").strip()
-    current_version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    base_version = _read_remote_text(repo_root, "VERSION", "0.0.0-dev").strip()
+    current_version = (repo_root / "VERSION").read_text(encoding="utf-8").strip()
     if _version_tuple(current_version) is None or current_version == base_version:
         version = _next_version(base_version)
     else:
         version = current_version
-    (ROOT / "VERSION").write_text(version + "\n", encoding="utf-8")
-    _update_changelog(version)
+    (repo_root / "VERSION").write_text(version + "\n", encoding="utf-8")
+    _update_changelog(version, repo_root)
 
-    findings = scan_repository(ROOT, private_terms, _publication_text())
+    findings = scan_repository(repo_root, private_terms, _publication_text())
     if findings:
         raise SyncError("privacy check failed before repository publication")
-    _run(["git", "add", "--", "pack", "VERSION", "CHANGELOG.md"])
-    staged = _run(["git", "diff", "--cached", "--name-only"])
+    _run(["git", "add", "--", "pack", "VERSION", "CHANGELOG.md"], cwd=repo_root)
+    staged = _run(["git", "diff", "--cached", "--name-only"], cwd=repo_root)
     if not staged:
         print("reference sources match the open pack; no pull request update")
         return
@@ -578,7 +626,7 @@ def _publish(files: dict[Path, str], private_terms: list[str], auto_merge: bool)
     env["GIT_COMMITTER_EMAIL"] = "harklight-pack-sync"
     commit = subprocess.run(
         ["git", "commit", "-m", COMMIT_MESSAGE],
-        cwd=ROOT,
+        cwd=repo_root,
         env=env,
         capture_output=True,
         text=True,
@@ -587,27 +635,13 @@ def _publish(files: dict[Path, str], private_terms: list[str], auto_merge: bool)
     if commit.returncode != 0:
         raise SyncError("the sync commit could not be created")
     try:
-        _push_sync_branch(open_pr_exists, expected_remote)
+        _push_sync_branch(repo_root, open_pr_exists, expected_remote)
     except SyncError:
         raise SyncError("the sync branch could not be pushed")
 
-    open_prs = json.loads(
-        _run(
-            [
-                "gh",
-                "pr",
-                "list",
-                "--state",
-                "open",
-                "--head",
-                SYNC_BRANCH,
-                "--json",
-                "number,url,title",
-            ]
-        )
-    )
+    open_prs = _list_sync_prs(repo_root)
     if not open_prs:
-        body_file = ROOT / ".sync-pr-body"
+        body_file = repo_root / ".sync-pr-body"
         body_file.write_text(PR_BODY, encoding="utf-8")
         try:
             _run(
@@ -623,12 +657,16 @@ def _publish(files: dict[Path, str], private_terms: list[str], auto_merge: bool)
                     PR_TITLE,
                     "--body-file",
                     str(body_file),
-                ]
+                ],
+                cwd=repo_root,
             )
         finally:
             body_file.unlink(missing_ok=True)
     if auto_merge:
-        _run(["gh", "pr", "merge", "--auto", "--squash", SYNC_BRANCH])
+        _run(
+            ["gh", "pr", "merge", "--auto", "--squash", SYNC_BRANCH],
+            cwd=repo_root,
+        )
     print("privacy-checked sync pull request is ready")
 
 
