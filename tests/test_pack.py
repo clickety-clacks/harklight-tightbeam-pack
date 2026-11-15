@@ -155,6 +155,90 @@ class SourceSyncTests(unittest.TestCase):
                 with self.assertRaises(sync_from_installation.SyncError):
                     sync_from_installation.generate(copied)
 
+    def test_open_pr_fetches_tracking_ref_in_single_branch_clone(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            remote = root / "remote.git"
+            seed = root / "seed"
+            repo = root / "repo"
+
+            def git(*args: str, cwd: Path = repo) -> str:
+                result = subprocess.run(
+                    ["git", *args],
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    raise AssertionError("scratch git operation failed")
+                return result.stdout.strip()
+
+            def ref_exists() -> bool:
+                result = subprocess.run(
+                    [
+                        "git",
+                        "show-ref",
+                        "--verify",
+                        "--quiet",
+                        f"refs/remotes/origin/{sync_from_installation.SYNC_BRANCH}",
+                    ],
+                    cwd=repo,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                return result.returncode == 0
+
+            git("init", "--bare", str(remote), cwd=root)
+            git("init", "--initial-branch=main", str(seed), cwd=root)
+            git("config", "user.name", "Pack Test", cwd=seed)
+            git("config", "user.email", "pack-test", cwd=seed)
+            (seed / "pack.txt").write_text("base\n", encoding="utf-8")
+            git("add", "pack.txt", cwd=seed)
+            git("commit", "-m", "base", cwd=seed)
+            git("remote", "add", "origin", str(remote), cwd=seed)
+            git("push", "origin", "main", cwd=seed)
+            git("checkout", "-b", sync_from_installation.SYNC_BRANCH, cwd=seed)
+            (seed / "pack.txt").write_text("open sync\n", encoding="utf-8")
+            git("commit", "-am", "open sync", cwd=seed)
+            git("push", "origin", sync_from_installation.SYNC_BRANCH, cwd=seed)
+            remote_sync = git("rev-parse", "HEAD", cwd=seed)
+
+            git(
+                "clone",
+                "--single-branch",
+                "--branch",
+                "main",
+                str(remote),
+                str(repo),
+                cwd=root,
+            )
+            self.assertEqual(
+                git("config", "--get-all", "remote.origin.fetch"),
+                "+refs/heads/main:refs/remotes/origin/main",
+            )
+            self.assertFalse(ref_exists())
+
+            with patch.object(sync_from_installation, "ROOT", repo), patch.object(
+                sync_from_installation,
+                "_list_sync_prs",
+                return_value=[{"number": 2, "url": "", "title": ""}],
+            ):
+                open_pr_exists, expected_remote = sync_from_installation._open_sync_pr(
+                    repo
+                )
+
+            self.assertTrue(open_pr_exists)
+            self.assertIsNone(expected_remote)
+            self.assertTrue(ref_exists())
+            self.assertEqual(
+                git("branch", "--show-current"), sync_from_installation.SYNC_BRANCH
+            )
+            self.assertEqual(git("rev-parse", "HEAD"), remote_sync)
+
     def test_next_sync_rebases_from_main_after_squash_merge(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -213,13 +297,17 @@ class SourceSyncTests(unittest.TestCase):
             with patch.object(sync_from_installation, "ROOT", repo), patch.object(
                 sync_from_installation, "_run", side_effect=run_command
             ):
-                open_pr_exists, expected_remote = sync_from_installation._open_sync_pr()
+                open_pr_exists, expected_remote = sync_from_installation._open_sync_pr(
+                    repo
+                )
                 self.assertFalse(open_pr_exists)
                 self.assertEqual(expected_remote, stale_sync)
                 self.assertEqual(git("rev-parse", "HEAD"), main_tip)
                 (repo / "pack.txt").write_text("next sync content\n", encoding="utf-8")
                 git("commit", "-am", "second sync")
-                sync_from_installation._push_sync_branch(open_pr_exists, expected_remote)
+                sync_from_installation._push_sync_branch(
+                    repo, open_pr_exists, expected_remote
+                )
 
             remote_sync = git(
                 "ls-remote", "--heads", "origin", sync_from_installation.SYNC_BRANCH
@@ -229,6 +317,185 @@ class SourceSyncTests(unittest.TestCase):
                 git("merge-base", "origin/main", sync_from_installation.SYNC_BRANCH),
                 main_tip,
             )
+
+
+class ScratchSyncTests(unittest.TestCase):
+    def test_open_pr_updates_in_scratch_clone_and_noops_without_touching_service(
+        self,
+    ) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            remote = root / "remote.git"
+            seed = root / "seed"
+            service = root / "service"
+
+            def git(*args: str, cwd: Path = service) -> str:
+                result = subprocess.run(
+                    ["git", *args],
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    raise AssertionError("scratch git operation failed")
+                return result.stdout.strip()
+
+            def remote_sync_head() -> str:
+                return git(
+                    "--git-dir",
+                    str(remote),
+                    "rev-parse",
+                    f"refs/heads/{sync_from_installation.SYNC_BRANCH}",
+                    cwd=root,
+                )
+
+            git("init", "--bare", str(remote), cwd=root)
+            git("init", "--initial-branch=main", str(seed), cwd=root)
+            git("config", "user.name", "Pack Test", cwd=seed)
+            git("config", "user.email", "pack-test", cwd=seed)
+            (seed / "VERSION").write_text("0.1.0\n", encoding="utf-8")
+            (seed / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
+            (seed / "pack").mkdir()
+            (seed / "pack" / "guidance.md").write_text(
+                "base guidance\n", encoding="utf-8"
+            )
+            (seed / "pack" / "elections.json").write_text(
+                '{"roles":[]}\n', encoding="utf-8"
+            )
+            skill = seed / "pack" / "skill" / "harklight-agent"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("generic skill\n", encoding="utf-8")
+            git("add", "VERSION", "CHANGELOG.md", "pack", cwd=seed)
+            git("commit", "-m", "base", cwd=seed)
+            git("remote", "add", "origin", str(remote), cwd=seed)
+            git("push", "origin", "main", cwd=seed)
+
+            git("checkout", "-b", sync_from_installation.SYNC_BRANCH, cwd=seed)
+            (seed / "VERSION").write_text("0.1.1\n", encoding="utf-8")
+            (seed / "CHANGELOG.md").write_text(
+                "# Changelog\n\n## v0.1.1\n\nInitial content sync.\n",
+                encoding="utf-8",
+            )
+            (seed / "pack" / "guidance.md").write_text(
+                "old guidance\n", encoding="utf-8"
+            )
+            git("add", "VERSION", "CHANGELOG.md", "pack", cwd=seed)
+            git("commit", "-m", "open sync", cwd=seed)
+            git("push", "origin", sync_from_installation.SYNC_BRANCH, cwd=seed)
+            prior_sync_head = git("rev-parse", "HEAD", cwd=seed)
+
+            git(
+                "clone",
+                "--single-branch",
+                "--branch",
+                "main",
+                str(remote),
+                str(service),
+                cwd=root,
+            )
+            installed_head = git("rev-parse", "HEAD", cwd=service)
+            original_guidance = (service / "pack" / "guidance.md").read_text(
+                encoding="utf-8"
+            )
+            files = {
+                service / "pack" / "guidance.md": "updated guidance\n",
+                service / "pack" / "elections.json": '{"roles":["coder"]}\n',
+                service / "pack" / "skill" / "harklight-agent" / "SKILL.md": (
+                    "generic updated skill\n"
+                ),
+            }
+            open_pr = [{"number": 2, "url": "", "title": ""}]
+            real_run = sync_from_installation._run
+            github_commands: list[list[str]] = []
+
+            def run_command(
+                args: list[str], cwd: Path | None = None, capture: bool = True
+            ) -> str:
+                if args[:2] == ["gh", "pr"]:
+                    github_commands.append(args)
+                    if args[:3] == ["gh", "pr", "list"]:
+                        return json.dumps(open_pr)
+                    return ""
+                return real_run(args, cwd=cwd, capture=capture)
+
+            with (
+                patch.object(sync_from_installation, "ROOT", service),
+                patch.object(
+                    sync_from_installation,
+                    "PACK_REPOSITORY_URL",
+                    str(remote),
+                    create=True,
+                ),
+                patch.object(
+                    sync_from_installation,
+                    "_list_sync_prs",
+                    return_value=open_pr,
+                ) as list_prs,
+                patch.object(sync_from_installation, "_run", side_effect=run_command),
+            ):
+                sync_from_installation._publish(files, [], auto_merge=False)
+                updated_sync_head = remote_sync_head()
+                self.assertNotEqual(updated_sync_head, prior_sync_head)
+                self.assertEqual(
+                    git(
+                        "--git-dir",
+                        str(remote),
+                        "rev-parse",
+                        f"{updated_sync_head}^",
+                        cwd=root,
+                    ),
+                    prior_sync_head,
+                )
+                self.assertEqual(
+                    git("rev-parse", "HEAD", cwd=service),
+                    installed_head,
+                    "sync PR staging changed the installed checkout",
+                )
+                self.assertEqual(git("status", "--porcelain", cwd=service), "")
+                self.assertEqual(
+                    (service / "pack" / "guidance.md").read_text(encoding="utf-8"),
+                    original_guidance,
+                )
+                self.assertEqual(list_prs.call_count, 2)
+                self.assertFalse(
+                    any(
+                        command[:3] == ["gh", "pr", "create"]
+                        for command in github_commands
+                    )
+                )
+
+                list_prs.reset_mock()
+                github_commands.clear()
+                sync_from_installation._publish(files, [], auto_merge=False)
+                self.assertEqual(remote_sync_head(), updated_sync_head)
+                self.assertEqual(list_prs.call_count, 1)
+                self.assertFalse(
+                    any(
+                        command[:3] == ["gh", "pr", "create"]
+                        for command in github_commands
+                    )
+                )
+
+                list_prs.reset_mock()
+                private_files = dict(files)
+                private_files[service / "pack" / "guidance.md"] = (
+                    "private-sentinel-term\n"
+                )
+                with self.assertRaisesRegex(
+                    sync_from_installation.SyncError,
+                    "privacy check failed before repository publication",
+                ):
+                    sync_from_installation._publish(
+                        private_files,
+                        ["private-sentinel-term"],
+                        auto_merge=False,
+                    )
+                self.assertEqual(remote_sync_head(), updated_sync_head)
+                self.assertEqual(git("rev-parse", "HEAD", cwd=service), installed_head)
+                self.assertEqual(git("status", "--porcelain", cwd=service), "")
 
 
 class ApplyTests(unittest.TestCase):
