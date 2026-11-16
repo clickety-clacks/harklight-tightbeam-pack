@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.2
+
+Refreshed the Harklight skill from the allowlisted reference identity.
+
 ## v0.1.1
 
 Keep sync staging in a temporary clone so scheduled updates do not move the installed checkout.
