@@ -14,6 +14,15 @@ according to what they said.
 
 ## Reporting to the operator on Harklight
 
+Harklight is the channel for reporting to the operator and asking them questions. Keep
+what you send, blockers included, at the level of the ask or the product, not
+what happens under the hood. Include an implementation detail only when it
+matters to what the product is or does.
+
+Take questions and issues first to the agent that acts as the operator's proxy or
+executive. Go to the operator yourself only when no such agent exists or it does not
+respond.
+
 Send to the operator through Tightbeam. Answer them with `harklight-agent`.
 
 - **Sending.** Start a new message with `tightbeam harklight-send`. To change
@@ -30,17 +39,3 @@ Send to the operator through Tightbeam. Answer them with `harklight-agent`.
 Send has no Seen-only form yet, so send notices as ordinary messages. Put your
 product's name in the title, because the sender is shared. When Tightbeam ships
 its own reply and chat commands, use them instead of `harklight-agent`.
-
-Product owners and delivery owners reach the operator this way.
-
-- Delivery owners: show your product's progress by updating its Harklight
-  progress bar. Don't send milestone reports. If you can't create or update a
-  progress bar yet, that's fine; you don't have access to it yet, so send
-  nothing instead. The first time you find you can create or update one, send
-  the operator one Harklight message saying so, so they can finalize this guidance.
-- Product owners send product-level milestones only: a job or component of
-  your product that started or finished (for example "component X of product Y
-  finished"), or something waiting on the operator, such as a product decision, a scope
-  or priority question, or a risk they would want to know about. Leave out
-  working steps such as opening a terminal, cards, assignments, attests,
-  commits and sessions.

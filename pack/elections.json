@@ -2,6 +2,7 @@
   "roles": [
     "coder",
     "default",
+    "exec",
     "executive",
     "guidance-reviewer",
     "guidance-writer",
