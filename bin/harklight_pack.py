@@ -315,11 +315,18 @@ def _toml_roles(identity: Path) -> dict[str, Path]:
     return {path.stem: path for path in sorted((identity / "archetypes").glob("*.toml"))}
 
 
-def _edit_manifest(path: Path, edit: Callable[[str], str], text: str) -> str:
+def _edit_manifest(path: Path, edit: Callable[[str], str]) -> tuple[str, str]:
+    """Read a manifest apply is about to edit; refuse by file name if it can't be."""
     try:
-        return edit(text)
+        text = path.read_text(encoding="utf-8")
+        name = tomllib.loads(text).get("name")
+        if name != path.stem:
+            raise ApplyError("an archetype has an unexpected identity")
+        return text, edit(text)
     except ApplyError as error:
         raise ApplyError(f"{error} ({path.name})") from error
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+        raise ApplyError(f"an archetype manifest cannot be read ({path.name})") from error
 
 
 def _managed_guidance(identity: Path, pack: Pack) -> tuple[Path, str]:
@@ -356,8 +363,7 @@ def _planned_changes(identity: Path, pack: Pack) -> list[tuple[str, Path, str]]:
         path = manifests.get(role)
         if path is None:
             continue
-        current = path.read_text(encoding="utf-8")
-        updated = _edit_manifest(path, _add_election, current)
+        current, updated = _edit_manifest(path, _add_election)
         if updated != current:
             changes.append((f"manifest:{role}", path, updated))
     for role, path in sorted(manifests.items()):
@@ -369,7 +375,7 @@ def _planned_changes(identity: Path, pack: Pack) -> list[tuple[str, Path, str]]:
             continue
         if ELECTION_MARKER not in current:
             continue
-        updated = _edit_manifest(path, _remove_election, current)
+        current, updated = _edit_manifest(path, _remove_election)
         if updated != current:
             changes.append((f"manifest:{role}", path, updated))
     return changes

@@ -16,6 +16,13 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 SKIP_PARTS = {".git", "__pycache__", "dist"}
+# Only addresses that are not globally routable are flagged: private,
+# loopback, link-local and shared (overlay-network) ranges. Documentation
+# ranges are examples, not internal addresses.
+DOCUMENTATION_NETWORKS = tuple(
+    ipaddress.ip_network(f"{prefix}.0/24")
+    for prefix in ("192.0.2", "198.51.100", "203.0.113")
+)
 
 
 def _patterns() -> list[tuple[str, re.Pattern[str]]]:
@@ -62,7 +69,9 @@ def _extract_ips(text: str) -> list[str]:
             address = ipaddress.ip_address(raw)
         except ValueError:
             continue
-        if address.is_private or address.is_loopback or address.is_link_local:
+        if not address.is_global and not any(
+            address in network for network in DOCUMENTATION_NETWORKS
+        ):
             found.append(raw)
     return found
 
