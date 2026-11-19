@@ -128,25 +128,66 @@ class SourceSyncTests(unittest.TestCase):
         self.assertIn("Reporting to the operator", relative["pack/guidance.md"])
         self.assertNotIn("local sender", relative["pack/skill/harklight-agent/SKILL.md"])
 
-    def test_unknown_harklight_guidance_stops_sync(self) -> None:
-        fixture = ROOT / "tests" / "fixtures" / "reference-identity"
-        with tempfile.TemporaryDirectory() as temp:
-            copied = Path(temp) / "identity"
-            import shutil
+    def _copied_identity(self, temp: str) -> Path:
+        import shutil
 
-            shutil.copytree(fixture, copied)
-            extra = copied / "guidance" / "extra.md"
-            extra.write_text("# Extra\n\nHarklight content is unknown here.\n", encoding="utf-8")
-            private_terms = Path(temp) / "terms.txt"
-            private_terms.write_text("private-sentinel-term\n", encoding="utf-8")
-            with patch.dict(
-                os.environ,
-                {
-                    "HARKLIGHT_PACK_PRIVATE_TERMS_FILE": str(private_terms),
-                },
-            ):
+        fixture = ROOT / "tests" / "fixtures" / "reference-identity"
+        copied = Path(temp) / "identity"
+        shutil.copytree(fixture, copied)
+        private_terms = Path(temp) / "terms.txt"
+        private_terms.write_text("private-sentinel-term\n", encoding="utf-8")
+        self.enterContext(
+            patch.dict(os.environ, {"HARKLIGHT_PACK_PRIVATE_TERMS_FILE": str(private_terms)})
+        )
+        return copied
+
+    def test_other_harklight_sources_are_left_out_and_noted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            copied = self._copied_identity(temp)
+            (copied / "guidance" / "extra.md").write_text(
+                "# Extra\n\nHarklight content is unknown here.\n", encoding="utf-8"
+            )
+            (copied / "skills" / "other.md").write_text(
+                "Harklight notes.\n", encoding="utf-8"
+            )
+            notes: list[str] = []
+            files, _ = sync_from_installation.generate(copied, notes=notes)
+        published = "\n".join(files.values())
+        self.assertNotIn("unknown here", published)
+        self.assertNotIn("Harklight notes", published)
+        self.assertEqual(len(notes), 2)
+
+    def test_new_skill_section_passes_with_a_note_unless_auto_merging(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            copied = self._copied_identity(temp)
+            skill = copied / "skills" / "harklight-agent" / "SKILL.md"
+            text = skill.read_text(encoding="utf-8")
+            marker = "## Existing local sender and compatibility route"
+            skill.write_text(
+                text.replace(marker, "## A new public section\n\nNew text.\n\n" + marker),
+                encoding="utf-8",
+            )
+            with self.assertRaises(sync_from_installation.SyncError):
+                sync_from_installation.generate(copied, strict=True)
+            notes: list[str] = []
+            files, _ = sync_from_installation.generate(copied, strict=False, notes=notes)
+        self.assertIn("A new public section", "\n".join(files.values()))
+        self.assertEqual(len(notes), 1)
+        self.assertIn("new or changed section", notes[0])
+        self.assertIn(notes[0], sync_from_installation._notes_comment(notes))
+
+    def test_missing_compatibility_section_always_stops_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            copied = self._copied_identity(temp)
+            skill = copied / "skills" / "harklight-agent" / "SKILL.md"
+            text = skill.read_text(encoding="utf-8")
+            skill.write_text(
+                text.replace("## Existing local sender and compatibility route", "## Other"),
+                encoding="utf-8",
+            )
+            for strict in (True, False):
                 with self.assertRaises(sync_from_installation.SyncError):
-                    sync_from_installation.generate(copied)
+                    sync_from_installation.generate(copied, strict=strict)
 
     def test_open_pr_fetches_tracking_ref_in_single_branch_clone(self) -> None:
         import subprocess

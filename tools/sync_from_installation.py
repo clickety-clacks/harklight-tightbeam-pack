@@ -171,7 +171,7 @@ def _normalize_operator(text: str, operator: str) -> str:
     return text
 
 
-def _clean_skill(skill: str) -> str:
+def _clean_skill(skill: str, strict: bool, notes: list[str]) -> str:
     frontmatter_match = re.match(r"\A---\n(.*?)\n---\n", skill, flags=re.S)
     if not frontmatter_match:
         raise SyncError("the allowlisted skill has unfamiliar front matter")
@@ -203,11 +203,18 @@ def _clean_skill(skill: str) -> str:
         )
 
     private_sections = list(PRIVATE_SECTION_RE.finditer(body))
+    # The compatibility section is private and is cut before anything is
+    # published, so not finding it exactly once always stops the sync.
     if len(private_sections) != 1:
         raise SyncError("the allowlisted skill's compatibility section changed")
     private_section = private_sections[0]
     if re.search(r"(?m)^#{1,6}\s+.+$", body[private_section.end() :]):
-        raise SyncError("the allowlisted skill has an unrecognized trailing section")
+        if strict:
+            raise SyncError("the allowlisted skill has an unrecognized trailing section")
+        notes.append(
+            "The skill has a new section after its compatibility section; "
+            "everything from the compatibility section on was left out."
+        )
     body = body[: private_section.start()].rstrip() + "\n"
 
     normalized_blocks: list[str] = []
@@ -226,7 +233,9 @@ def _clean_skill(skill: str) -> str:
         for match in re.finditer(r"(?m)^#{1,6}\s+.+$", body)
     ]
     if headings != EXPECTED_SKILL_HEADINGS:
-        raise SyncError("the allowlisted skill has a new or changed section")
+        if strict:
+            raise SyncError("the allowlisted skill has a new or changed section")
+        notes.append("The skill has a new or changed section; review the diff.")
     body = body.replace("including from other fleet hosts", "including from remote hosts")
     return (
         "---\n"
@@ -238,7 +247,9 @@ def _clean_skill(skill: str) -> str:
     )
 
 
-def _read_guidance_sources(identity_root: Path) -> tuple[str, list[Section], list[str]]:
+def _read_guidance_sources(
+    identity_root: Path, strict: bool, notes: list[str]
+) -> tuple[str, list[Section], list[str]]:
     default_path = identity_root / DEFAULT_GUIDANCE_RELATIVE
     default_text = _read(default_path)
     default_sections = _extract_heading_section(
@@ -251,7 +262,9 @@ def _read_guidance_sources(identity_root: Path) -> tuple[str, list[Section], lis
         token in default_section.body.casefold()
         for token in ("harklight", "harklight-agent", "tightbeam harklight-send")
     ):
-        raise SyncError("the default Harklight guidance section changed shape")
+        if strict:
+            raise SyncError("the default Harklight guidance section changed shape")
+        notes.append("The default guidance section has a new shape; review the diff.")
 
     guidance_sources = sorted((identity_root / "guidance").rglob("*.md"))
     reporting_sections: list[Section] = []
@@ -268,7 +281,9 @@ def _read_guidance_sources(identity_root: Path) -> tuple[str, list[Section], lis
         token in reporting.body.casefold()
         for token in ("tightbeam harklight-send", "harklight-agent", "answer")
     ):
-        raise SyncError("the operator Harklight guidance section changed shape")
+        if strict:
+            raise SyncError("the operator Harklight guidance section changed shape")
+        notes.append("The operator guidance section has a new shape; review the diff.")
 
     allowed: dict[Path, list[tuple[int, int]]] = {
         default_path: [(default_section.start, default_section.end)]
@@ -276,22 +291,20 @@ def _read_guidance_sources(identity_root: Path) -> tuple[str, list[Section], lis
     for path, (_, sections) in indexed.items():
         if sections:
             allowed.setdefault(path, []).extend((section.start, section.end) for section in sections)
-    for path, (text, _) in indexed.items():
-        occurrences = list(re.finditer(r"harklight", text, flags=re.I))
+    skipped = 0
+    for path in guidance_sources:
+        text = indexed[path][0] if path in indexed else _read(path)
         ranges = allowed.get(path, [])
         if any(
             not any(start <= occurrence.start() < end for start, end in ranges)
-            for occurrence in occurrences
+            for occurrence in re.finditer(r"harklight", text, flags=re.I)
         ):
-            raise SyncError("an unrecognized Harklight guidance section was found")
-    for path in guidance_sources:
-        if path == default_path:
-            continue
-        text = _read(path)
-        occurrences = list(re.finditer(r"harklight", text, flags=re.I))
-        ranges = allowed.get(path, [])
-        if occurrences and not ranges:
-            raise SyncError("an unrecognized Harklight guidance section was found")
+            skipped += 1
+    if skipped:
+        notes.append(
+            f"{skipped} other guidance source(s) mention Harklight outside the "
+            "allowlisted sections; that text was not included."
+        )
 
     default_body = _normalize_operator(
         "## Decisions only the operator can act on in person\n\n" + default_section.body,
@@ -370,17 +383,29 @@ def source_private_terms(identity_root: Path, operators: list[str], host_terms: 
     return sorted({term.strip() for term in terms if len(term.strip()) >= 3})
 
 
-def generate(identity_root: Path) -> tuple[dict[Path, str], list[str]]:
+def generate(
+    identity_root: Path, strict: bool = True, notes: list[str] | None = None
+) -> tuple[dict[Path, str], list[str]]:
+    """Project the allowlisted sources.
+
+    With strict=False, source shape changes pass through and are appended to
+    notes for the pull request instead of stopping the sync.
+    """
+    if notes is None:
+        notes = []
     if not identity_root.is_dir():
         raise SyncError("the configured identity directory is unavailable")
     expected_skill = identity_root / SKILL_RELATIVE
-    skill = _clean_skill(_read(expected_skill))
-    guidance, _, operators = _read_guidance_sources(identity_root)
+    skill = _clean_skill(_read(expected_skill), strict, notes)
+    guidance, _, operators = _read_guidance_sources(identity_root, strict, notes)
     roles, hosts = _extract_elections(identity_root)
     if not roles:
-        raise SyncError("the reference identity has no Harklight skill elections")
+        if strict:
+            raise SyncError("the reference identity has no Harklight skill elections")
+        notes.append("No role elects the Harklight skill in the reference identity.")
 
     skill_root = identity_root / "skills"
+    skipped_skill_sources = 0
     for path in skill_root.rglob("*"):
         if not path.is_file() or path == expected_skill:
             continue
@@ -391,7 +416,12 @@ def generate(identity_root: Path) -> tuple[dict[Path, str], list[str]]:
         if "harklight" in path.as_posix().casefold() or re.search(
             r"harklight", content, flags=re.I
         ):
-            raise SyncError("an unrecognized Harklight skill source was found")
+            skipped_skill_sources += 1
+    if skipped_skill_sources:
+        notes.append(
+            f"{skipped_skill_sources} other skill file(s) mention Harklight; "
+            "they were not included."
+        )
 
     files = {
         PACK / PACK_SKILL: skill,
@@ -550,15 +580,28 @@ def _push_sync_branch(
     _run(command, cwd=repo_root)
 
 
-def _publication_text() -> dict[str, str]:
-    return {
+def _notes_comment(notes: list[str]) -> str:
+    lines = "\n".join(f"- {note}" for note in notes)
+    return "Source notes for review:\n\n" + lines + "\n"
+
+
+def _publication_text(comment: str = "") -> dict[str, str]:
+    texts = {
         "commit message": COMMIT_MESSAGE,
         "pull request title": PR_TITLE,
         "pull request body": PR_BODY,
     }
+    if comment:
+        texts["pull request comment"] = comment
+    return texts
 
 
-def _publish(files: dict[Path, str], private_terms: list[str], auto_merge: bool) -> None:
+def _publish(
+    files: dict[Path, str],
+    private_terms: list[str],
+    auto_merge: bool,
+    notes: list[str] | None = None,
+) -> None:
     with tempfile.TemporaryDirectory(prefix="harklight-pack-sync-") as temporary:
         temporary_root = Path(temporary)
         repo_root = temporary_root / "repo"
@@ -574,7 +617,7 @@ def _publish(files: dict[Path, str], private_terms: list[str], auto_merge: bool)
             ],
             cwd=temporary_root,
         )
-        _publish_in_checkout(repo_root, files, private_terms, auto_merge)
+        _publish_in_checkout(repo_root, files, private_terms, auto_merge, notes or [])
 
 
 def _publish_in_checkout(
@@ -582,7 +625,9 @@ def _publish_in_checkout(
     files: dict[Path, str],
     private_terms: list[str],
     auto_merge: bool,
+    notes: list[str] | None = None,
 ) -> None:
+    comment = _notes_comment(notes) if notes else ""
     open_pr_exists, expected_remote = _open_sync_pr(repo_root)
     checkout_files = {
         repo_root / path.relative_to(ROOT): content for path, content in files.items()
@@ -611,7 +656,7 @@ def _publish_in_checkout(
     (repo_root / "VERSION").write_text(version + "\n", encoding="utf-8")
     _update_changelog(version, repo_root)
 
-    findings = scan_repository(repo_root, private_terms, _publication_text())
+    findings = scan_repository(repo_root, private_terms, _publication_text(comment))
     if findings:
         raise SyncError("privacy check failed before repository publication")
     _run(["git", "add", "--", "pack", "VERSION", "CHANGELOG.md"], cwd=repo_root)
@@ -662,6 +707,11 @@ def _publish_in_checkout(
             )
         finally:
             body_file.unlink(missing_ok=True)
+    if comment:
+        _run(
+            ["gh", "pr", "comment", SYNC_BRANCH, "--body", comment],
+            cwd=repo_root,
+        )
     if auto_merge:
         _run(
             ["gh", "pr", "merge", "--auto", "--squash", SYNC_BRANCH],
@@ -672,7 +722,12 @@ def _publish_in_checkout(
 
 def run(open_pr: bool, preview: bool) -> int:
     identity_root = identity_root_from_environment()
-    files, private_terms = generate(identity_root)
+    policy = json.loads((ROOT / "sync-policy.json").read_text(encoding="utf-8"))
+    # Under review, a person reads the PR, so source changes pass through with
+    # notes. Under auto-merge no one reads it, so they stop the sync.
+    strict = policy.get("publish_policy") == "auto_merge_clean"
+    notes: list[str] = []
+    files, private_terms = generate(identity_root, strict, notes)
     generated_texts = {
         path.relative_to(ROOT).as_posix(): content for path, content in files.items()
     }
@@ -680,11 +735,10 @@ def run(open_pr: bool, preview: bool) -> int:
     if findings:
         raise SyncError("privacy check failed before pack generation")
     if open_pr:
-        policy = json.loads((ROOT / "sync-policy.json").read_text(encoding="utf-8"))
         policy_name = policy.get("publish_policy")
         if policy_name not in {"review", "auto_merge_clean"}:
             raise SyncError("the configured publish policy is not recognized")
-        _publish(files, private_terms, policy_name == "auto_merge_clean")
+        _publish(files, private_terms, policy_name == "auto_merge_clean", notes)
     elif preview:
         for path in files:
             print(f"would update {path.relative_to(ROOT)}")
