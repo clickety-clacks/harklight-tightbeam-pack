@@ -175,12 +175,20 @@ superseded target has no Tightbeam send record. Revise or retract instead uses
 the target's recorded handle and sender; a committed change affects that
 subscription. A cross-session retract does not promise a notice to its sender.
 
-If `--message` names no Tightbeam send record, the command refuses without a
-Harklight operation and explains that Tightbeam does not know the message's
-Harklight session. Raw `harklight-agent` is the route for a message unknown to
-Tightbeam; consult its installed `--help`. Raw revise/retract bypass
-Tightbeam's automatic wake effects;
-use the Tightbeam commands for the lifecycle described here.
+If `--message` names no Tightbeam send record (for example a message sent with
+raw `harklight-agent`), `harklight-revise` and `harklight-retract` still reach
+Harklight when you add `--session <handle>`, the Harklight session the message
+was sent in. `harklight-settle` does the same with `--op-id <key>`, the
+Harklight operation to retry. Harklight alone decides whether the change is
+allowed; Tightbeam adds no permission check. Because Tightbeam has no
+subscription for that message, it changes no wake or subscription state and the
+result says so: `wakeEffect: "none"`, `subscriptionEffect: "none"` and a note
+beginning "no subscription effect". Without the needed flag the command refuses
+without a Harklight operation and names the flag. If the message does have a
+Tightbeam send record, behavior is unchanged, and a `--session` or `--op-id`
+that contradicts the record is refused. Raw revise/retract bypass Tightbeam's
+automatic wake effects; use the Tightbeam commands for the lifecycle described
+here.
 
 ## Read results and settle an uncertain send
 
@@ -194,9 +202,13 @@ Results include `messageId` when minted, `senderId` and `handle` when known,
 `opId` when assigned, and the new `revision` for a committed revise.
 
 An `outcome_unknown` send is pending and unregistered: no subscription is open
-yet, and its ID is information only until the send is settled. Revise, retract
-or a superseding send naming that unresolved ID is refused as a whole, with no
-Harklight operation or wake effect. Settle that send explicitly:
+yet, and its ID is information only until the send is settled. Revise or retract
+naming that unresolved ID is refused, with no Harklight operation or wake
+effect. A superseding send that names it among other targets is not refused:
+the valid targets are superseded, and the unresolved one is reported as an
+`unchanged` target with a reason, like the targets Harklight warns about. A
+superseding send whose only target is the unresolved ID is refused as a whole.
+Settle that send explicitly:
 
 ```sh
 tightbeam harklight-settle --message "$HARKLIGHT_MESSAGE_ID"
@@ -206,12 +218,14 @@ This runs the existing same-operation recovery once, using the recorded op ID
 and unchanged inputs. It creates no new send or prepare. If it confirms commit,
 the original sender's subscription and any supersede effects are applied once.
 If it establishes refusal, the result says the message was not sent. If still
-unresolved, it says so, reports `wakeEffect: "none"`, and lifecycle actions on
-the ID remain refused. You may explicitly settle it again; do not put settle
+unresolved, it says so, reports `wakeEffect: "none"`, and revise and retract on
+the ID remain refused; a supersede that also names other targets still proceeds
+and warns for it. You may explicitly settle it again; do not put settle
 in a timer, poll or retry loop. You can also leave it for existing recovery at
 the next gateway start. Tightbeam does not otherwise retry it automatically.
-An already-settled or unknown ID is refused without a Harklight operation,
-with its settled outcome or the missing-record explanation. After settlement,
+An already-settled ID is refused without a Harklight operation, with its
+settled outcome. An ID Tightbeam has no record of is settled only with
+`--op-id`, as described above; without it the command refuses and names the flag. After settlement,
 ordinary lifecycle commands apply according to the established message state.
 
 An uncertain revise or retract leaves the subscription as it was and applies
