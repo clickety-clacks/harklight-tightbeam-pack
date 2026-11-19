@@ -54,10 +54,10 @@ the repository and configure Git to use the GitHub CLI credential helper.
 The default publish policy is review: sync opens a pull request and waits.
 Set publish_policy to auto_merge_clean in sync-policy.json only after
 automatic sync-PR merging has been chosen. Release publication has a separate
-release_policy: it defaults to manual, so a push to main does not publish a
-release. A manual release workflow dispatch on main publishes the reviewed
-version. Automatic publication from a main push requires release_policy to be
-changed to auto. Both paths run the same privacy checks.
+release_policy: it is auto, so a push to main that raises VERSION publishes the
+release. A release workflow dispatch on main also publishes the current
+version. Setting release_policy to manual stops publication from a push. Both
+paths run the same privacy checks.
 
 ## Privacy checks
 
@@ -83,7 +83,7 @@ HARKLIGHT_PACK_PRIVATE_TERMS_FILE=/path/to/private-terms.txt python3 tools/priva
 ~~~~
 
 The release workflow creates a versioned archive after a reviewed change
-updates VERSION and a release is dispatched on main. Release notes and assets
+raises VERSION and is merged to main. Release notes and assets
 pass the privacy check before publication.
 
 ## License

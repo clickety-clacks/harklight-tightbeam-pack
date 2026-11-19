@@ -671,8 +671,6 @@ class ReleaseFetchTests(unittest.TestCase):
         checksum = hashlib.sha256(archive_bytes).hexdigest()
         release = {
             "tag_name": f"v{version}",
-            "draft": False,
-            "prerelease": False,
             "assets": [
                 {"name": archive_name, "browser_download_url": "asset://archive"},
                 {"name": "SHA256SUMS", "browser_download_url": "asset://sums"},
