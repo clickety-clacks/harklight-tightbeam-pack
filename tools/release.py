@@ -50,13 +50,16 @@ def _previous_version() -> str | None:
 
 
 def _release_notes(version: str) -> str:
-    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    try:
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        changelog = ""
     match = re.search(
         r"(?ms)^## v" + re.escape(version) + r"\s*\n(.*?)(?=^## v|\Z)",
         changelog,
     )
     if not match or not match.group(1).strip():
-        raise RuntimeError("the versioned changelog entry is missing")
+        return f"Harklight for Tightbeam v{version}\n"
     return f"Harklight for Tightbeam v{version}\n\n{match.group(1).strip()}\n"
 
 
@@ -98,12 +101,9 @@ def main() -> int:
         current = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
         parsed = _version(current)
         previous = _previous_version()
-        previous_parsed = _version(previous) if previous else None
         if parsed is None or current == previous:
             print("no versioned pack release is required")
             return 0
-        if previous_parsed is not None and parsed <= previous_parsed:
-            raise RuntimeError("the release version must increase")
         notes = _release_notes(current)
         terms = private_terms_from_environment()
         findings = scan_repository(

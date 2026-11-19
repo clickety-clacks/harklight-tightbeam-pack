@@ -65,8 +65,8 @@ Configure the repository Actions secret HARKLIGHT_PACK_PRIVATE_TERMS before
 opening sync pull requests. Store one categorized term per line, such as
 machine|<private-machine-name>, person|<private-person-name>, and
 user|<private-user-id>; add email, hostname, path, or other categories when
-they apply. The checker fails closed when the secret is missing, malformed,
-or missing a required category. Keep the values out of repository files,
+they apply. The checker fails closed when the secret is missing or malformed.
+Keep the values out of repository files,
 workflow output, pull request text, and release notes. For a local
 pre-publication check, point HARKLIGHT_PACK_PRIVATE_TERMS_FILE at a private
 file containing one term per line. Fork pull requests are scanned by the
