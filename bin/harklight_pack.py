@@ -93,8 +93,8 @@ def _download_latest_pack() -> Pack:
     release = json.loads(_request(api_url))
     tag = release.get("tag_name")
     version = _semver(str(tag or ""))
-    if release.get("draft") or release.get("prerelease") or version is None:
-        raise ApplyError("the latest public release is not a stable version")
+    if version is None:
+        raise ApplyError("the latest public release tag is not a version")
     assets = {asset.get("name"): asset for asset in release.get("assets", [])}
     archive_name = f"harklight-pack-{tag}.tar.gz"
     if archive_name not in assets or "SHA256SUMS" not in assets:
