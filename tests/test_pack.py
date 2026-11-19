@@ -42,6 +42,10 @@ class PrivacyCheckTests(unittest.TestCase):
         self.assertIn("sample: possible internal IP address", findings("host 10." + "1.2.3"))
         self.assertIn("sample: possible internal IP address", findings("host 192." + "168.0.9"))
         self.assertIn("sample: possible internal IP address", findings("at 127." + "0.0.1"))
+        self.assertIn("sample: possible internal IP address", findings("overlay 100." + "64.1.2"))
+        self.assertIn("sample: possible internal IP address", findings("overlay 100." + "127.255.1"))
+        self.assertEqual(findings("overlay 100." + "128.0.1"), [])
+        self.assertEqual(findings("example 203." + "0.113.7"), [])
         self.assertIn("sample: possible email address", findings("mail alice" + "@example.com"))
 
     def test_private_terms_match_whole_identifiers(self) -> None:
@@ -589,6 +593,16 @@ class ApplyTests(unittest.TestCase):
             )
 
             (archetypes / "coder.toml").write_text('name = "coder"\n', encoding="utf-8")
+            with self.assertRaisesRegex(harklight_pack.ApplyError, r"coder\.toml"):
+                harklight_pack._planned_changes(identity, pack)
+
+            (archetypes / "coder.toml").write_text(
+                'name = "someone-else"\nskills = ["base"]\n', encoding="utf-8"
+            )
+            with self.assertRaisesRegex(harklight_pack.ApplyError, r"coder\.toml"):
+                harklight_pack._planned_changes(identity, pack)
+
+            (archetypes / "coder.toml").write_bytes(b"\xff\xfe")
             with self.assertRaisesRegex(harklight_pack.ApplyError, r"coder\.toml"):
                 harklight_pack._planned_changes(identity, pack)
 
