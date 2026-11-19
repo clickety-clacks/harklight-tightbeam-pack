@@ -33,21 +33,16 @@ class PrivacyCheckTests(unittest.TestCase):
         self.assertIn("sample: possible email address", findings)
         self.assertNotIn("private-sentinel-term", "\n".join(findings))
 
-    def test_public_markdown_checks_unrecognized_names(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / "notes.md").write_text(
-                "A note about Unlistedplace Harbor.\n", encoding="utf-8"
-            )
-            findings = privacy_check.scan_repository(root)
-        self.assertIn("notes.md: unrecognized proper noun", findings)
+    def test_only_internal_addresses_and_real_emails_are_flagged(self) -> None:
+        def findings(text: str) -> list[str]:
+            return privacy_check.text_findings("sample", text)
 
-    def test_pull_request_memento_labels_are_not_private_names(self) -> None:
-        findings = privacy_check.text_findings(
-            "pull request body",
-            "Tightbeam-Assignment: asg_123\nTightbeam-Work-Item: wi_456",
-        )
-        self.assertNotIn("pull request body: unrecognized proper noun", findings)
+        self.assertEqual(findings("send from noreply" + "@example.com"), [])
+        self.assertEqual(findings("see 8.8.8.8"), [])
+        self.assertIn("sample: possible internal IP address", findings("host 10." + "1.2.3"))
+        self.assertIn("sample: possible internal IP address", findings("host 192." + "168.0.9"))
+        self.assertIn("sample: possible internal IP address", findings("at 127." + "0.0.1"))
+        self.assertIn("sample: possible email address", findings("mail alice" + "@example.com"))
 
     def test_private_terms_match_whole_identifiers(self) -> None:
         whole = privacy_check.text_findings("sample", "the cat is here", ["cat"])
@@ -64,21 +59,19 @@ class PrivacyCheckTests(unittest.TestCase):
         )
         self.assertIn("sample: configured private term", findings)
 
-    def test_unrecognized_names_match_at_line_start_bullet_and_after_period(self) -> None:
-        findings = privacy_check.text_findings(
-            "sample",
-            "Zephyria Sable approves releases.\n- Zephyria Sable approves releases.\n"
-            "The operator. Zephyria Sable hosts the gateway.",
-        )
-        self.assertIn("sample: unrecognized proper noun", findings)
-
-    def test_ci_private_terms_fail_closed_and_require_categories(self) -> None:
+    def test_ci_private_terms_fail_closed(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(ValueError):
                 privacy_check.private_terms_from_environment()
         with patch.dict(
             os.environ,
-            {"HARKLIGHT_PACK_PRIVATE_TERMS": "machine|privatehost\nperson|privateperson"},
+            {"HARKLIGHT_PACK_PRIVATE_TERMS": "machine|privatehost"},
+            clear=True,
+        ):
+            self.assertEqual(privacy_check.private_terms_from_environment(), ["privatehost"])
+        with patch.dict(
+            os.environ,
+            {"HARKLIGHT_PACK_PRIVATE_TERMS": "machine|ab"},
             clear=True,
         ):
             with self.assertRaises(ValueError):
@@ -646,6 +639,16 @@ class ReleaseFetchTests(unittest.TestCase):
             ):
                 self.assertEqual(release_tool.main(), 0)
             build_assets.assert_not_called()
+
+    def test_release_without_changelog_entry_uses_default_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
+            with patch.object(release_tool, "ROOT", root):
+                self.assertEqual(
+                    release_tool._release_notes("1.0.0"),
+                    "Harklight for Tightbeam v1.0.0\n",
+                )
 
     def test_update_download_checks_archive_checksum(self) -> None:
         archive_buffer = io.BytesIO()

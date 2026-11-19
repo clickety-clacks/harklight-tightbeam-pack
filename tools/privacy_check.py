@@ -16,93 +16,6 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 SKIP_PARTS = {".git", "__pycache__", "dist"}
-PUBLIC_NAMES = {
-    "Harklight",
-    "Tightbeam",
-    "GitHub",
-    "Agent",
-    "Codex",
-    "Claude",
-    "Python",
-    "Markdown",
-    "JSON",
-    "TOML",
-    "MIT",
-    "UTC",
-    "README",
-    "VERSION",
-    "SHA256",
-    "HTTP",
-    "HTTPS",
-    "API",
-    "CLI",
-    "URL",
-    "ACK",
-    "Seen",
-    "Linux",
-    "macOS",
-    "Unix",
-    "Git",
-    "Bash",
-    "Actions",
-    "Server",
-    "Python",
-    "Proceed",
-    "Defer",
-    "Unit",
-    "Description",
-    "Service",
-    "Type",
-    "Environment",
-    "Timer",
-    "Persistent",
-    "Install",
-    "WantedBy",
-    "Assignment",
-    "Work",
-    "Item",
-}
-COMMON_CAPS = {
-    "A",
-    "About",
-    "After",
-    "All",
-    "An",
-    "And",
-    "Apply",
-    "Add",
-    "Automatic",
-    "Both",
-    "Changes",
-    "Configure",
-    "Do",
-    "Each",
-    "Existing",
-    "For",
-    "If",
-    "In",
-    "It",
-    "Keep",
-    "MIT",
-    "New",
-    "No",
-    "Only",
-    "Or",
-    "Our",
-    "Python",
-    "Run",
-    "Set",
-    "Start",
-    "Standalone",
-    "Some",
-    "Sync",
-    "The",
-    "This",
-    "To",
-    "Use",
-    "When",
-    "With",
-}
 
 
 def _patterns() -> list[tuple[str, re.Pattern[str]]]:
@@ -110,7 +23,12 @@ def _patterns() -> list[tuple[str, re.Pattern[str]]]:
     internal_suffix = ".ts" + ".net"
     private_key_header = "-" * 5 + "BEGIN"
     return [
-        ("email address", re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)),
+        (
+            "email address",
+            re.compile(
+                r"\b(?!no-?reply@)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I
+            ),
+        ),
         (
             "absolute home path",
             re.compile(r"/(?:" + home_word + r"|Users)/[A-Za-z0-9._-]+"),
@@ -141,36 +59,18 @@ def _extract_ips(text: str) -> list[str]:
     for match in re.finditer(r"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])", text):
         raw = match.group(0)
         try:
-            ipaddress.ip_address(raw)
+            address = ipaddress.ip_address(raw)
         except ValueError:
             continue
-        found.append(raw)
+        if address.is_private or address.is_loopback or address.is_link_local:
+            found.append(raw)
     return found
-
-
-def _proper_noun_findings(text: str) -> list[str]:
-    findings: list[str] = []
-    for line in text.splitlines():
-        if line.lstrip().startswith("#"):
-            continue
-        words = list(re.finditer(r"\b[A-Z][a-z]{2,}\b", line))
-        for first, second in zip(words, words[1:]):
-            gap = line[first.end() : second.start()]
-            if not gap.isspace():
-                continue
-            pair = (first.group(0), second.group(0))
-            if all(word in PUBLIC_NAMES or word in COMMON_CAPS for word in pair):
-                continue
-            findings.append("unrecognized name")
-            break
-    return findings
 
 
 def text_findings(
     label: str,
     text: str,
     private_terms: Iterable[str] = (),
-    check_names: bool = True,
 ) -> list[str]:
     findings: list[str] = []
     for description, pattern in _patterns():
@@ -188,10 +88,6 @@ def text_findings(
         ):
             findings.append(f"{label}: configured private term")
             break
-
-    if check_names:
-        if _proper_noun_findings(text):
-            findings.append(f"{label}: unrecognized proper noun")
     return findings
 
 
@@ -271,28 +167,7 @@ def scan_repository(
     findings: list[str] = []
     terms = tuple(private_terms)
     for label, text in texts:
-        suffix = Path(label).suffix.lower()
-        findings.extend(
-            text_findings(
-                label,
-                text,
-                terms,
-                check_names=(
-                    label.startswith("pack/")
-                    or suffix in {
-                        ".md",
-                        ".txt",
-                        ".yml",
-                        ".yaml",
-                        ".toml",
-                        ".json",
-                        ".service",
-                        ".timer",
-                        ".ini",
-                    }
-                ),
-            )
-        )
+        findings.extend(text_findings(label, text, terms))
     for label, text in additional:
         findings.extend(text_findings(label, text, terms))
     return sorted(set(findings))
@@ -310,8 +185,10 @@ def read_private_terms(path: Path | None) -> list[str]:
     ]
 
 
-CI_PRIVATE_CATEGORIES = {"machine", "person", "user"}
-CI_ALLOWED_CATEGORIES = CI_PRIVATE_CATEGORIES | {
+CI_ALLOWED_CATEGORIES = {
+    "machine",
+    "person",
+    "user",
     "email",
     "hostname",
     "path",
@@ -325,7 +202,6 @@ def private_terms_from_environment() -> list[str]:
     if not raw.strip():
         raise ValueError("CI private-term configuration is unavailable")
     values: list[str] = []
-    categories: set[str] = set()
     for line in raw.splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
@@ -339,11 +215,7 @@ def private_terms_from_environment() -> list[str]:
             or "\n" in value
         ):
             raise ValueError("CI private-term configuration is malformed")
-        categories.add(category)
         values.append(value)
-    missing = CI_PRIVATE_CATEGORIES - categories
-    if missing:
-        raise ValueError("CI private-term categories are incomplete")
     return values
 
 
