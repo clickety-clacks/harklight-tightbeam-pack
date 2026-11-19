@@ -38,7 +38,7 @@ class PrivacyCheckTests(unittest.TestCase):
             return privacy_check.text_findings("sample", text)
 
         self.assertEqual(findings("send from noreply" + "@example.com"), [])
-        self.assertEqual(findings("see 8.8.8.8"), [])
+        self.assertEqual(findings("see 8." + "8.8.8"), [])
         self.assertIn("sample: possible internal IP address", findings("host 10." + "1.2.3"))
         self.assertIn("sample: possible internal IP address", findings("host 192." + "168.0.9"))
         self.assertIn("sample: possible internal IP address", findings("at 127." + "0.0.1"))
