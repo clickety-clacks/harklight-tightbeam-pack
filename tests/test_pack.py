@@ -174,7 +174,20 @@ class SourceSyncTests(unittest.TestCase):
         self.assertIn("A new public section", "\n".join(files.values()))
         self.assertEqual(len(notes), 1)
         self.assertIn("new or changed section", notes[0])
-        self.assertIn(notes[0], sync_from_installation._pr_body(notes))
+        self.assertIn(notes[0], sync_from_installation._notes_comment(notes))
+
+    def test_missing_compatibility_section_always_stops_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            copied = self._copied_identity(temp)
+            skill = copied / "skills" / "harklight-agent" / "SKILL.md"
+            text = skill.read_text(encoding="utf-8")
+            skill.write_text(
+                text.replace("## Existing local sender and compatibility route", "## Other"),
+                encoding="utf-8",
+            )
+            for strict in (True, False):
+                with self.assertRaises(sync_from_installation.SyncError):
+                    sync_from_installation.generate(copied, strict=strict)
 
     def test_open_pr_fetches_tracking_ref_in_single_branch_clone(self) -> None:
         import subprocess

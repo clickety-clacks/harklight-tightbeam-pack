@@ -203,23 +203,19 @@ def _clean_skill(skill: str, strict: bool, notes: list[str]) -> str:
         )
 
     private_sections = list(PRIVATE_SECTION_RE.finditer(body))
+    # The compatibility section is private and is cut before anything is
+    # published, so not finding it exactly once always stops the sync.
     if len(private_sections) != 1:
+        raise SyncError("the allowlisted skill's compatibility section changed")
+    private_section = private_sections[0]
+    if re.search(r"(?m)^#{1,6}\s+.+$", body[private_section.end() :]):
         if strict:
-            raise SyncError("the allowlisted skill's compatibility section changed")
+            raise SyncError("the allowlisted skill has an unrecognized trailing section")
         notes.append(
-            "The skill's compatibility section was not found exactly once; "
-            "review the skill for content that should not be public."
+            "The skill has a new section after its compatibility section; "
+            "everything from the compatibility section on was left out."
         )
-    if private_sections:
-        private_section = private_sections[0]
-        if re.search(r"(?m)^#{1,6}\s+.+$", body[private_section.end() :]):
-            if strict:
-                raise SyncError("the allowlisted skill has an unrecognized trailing section")
-            notes.append(
-                "The skill has a new section after its compatibility section; "
-                "everything from the compatibility section on was left out."
-            )
-        body = body[: private_section.start()].rstrip() + "\n"
+    body = body[: private_section.start()].rstrip() + "\n"
 
     normalized_blocks: list[str] = []
     for block in re.split(r"\n\s*\n", body):
@@ -584,19 +580,20 @@ def _push_sync_branch(
     _run(command, cwd=repo_root)
 
 
-def _pr_body(notes: list[str]) -> str:
-    if not notes:
-        return PR_BODY
+def _notes_comment(notes: list[str]) -> str:
     lines = "\n".join(f"- {note}" for note in notes)
-    return PR_BODY + "\nSource notes for review:\n\n" + lines + "\n"
+    return "Source notes for review:\n\n" + lines + "\n"
 
 
-def _publication_text(body: str = PR_BODY) -> dict[str, str]:
-    return {
+def _publication_text(comment: str = "") -> dict[str, str]:
+    texts = {
         "commit message": COMMIT_MESSAGE,
         "pull request title": PR_TITLE,
-        "pull request body": body,
+        "pull request body": PR_BODY,
     }
+    if comment:
+        texts["pull request comment"] = comment
+    return texts
 
 
 def _publish(
@@ -630,7 +627,7 @@ def _publish_in_checkout(
     auto_merge: bool,
     notes: list[str] | None = None,
 ) -> None:
-    body = _pr_body(notes or [])
+    comment = _notes_comment(notes) if notes else ""
     open_pr_exists, expected_remote = _open_sync_pr(repo_root)
     checkout_files = {
         repo_root / path.relative_to(ROOT): content for path, content in files.items()
@@ -659,7 +656,7 @@ def _publish_in_checkout(
     (repo_root / "VERSION").write_text(version + "\n", encoding="utf-8")
     _update_changelog(version, repo_root)
 
-    findings = scan_repository(repo_root, private_terms, _publication_text(body))
+    findings = scan_repository(repo_root, private_terms, _publication_text(comment))
     if findings:
         raise SyncError("privacy check failed before repository publication")
     _run(["git", "add", "--", "pack", "VERSION", "CHANGELOG.md"], cwd=repo_root)
@@ -688,19 +685,9 @@ def _publish_in_checkout(
         raise SyncError("the sync branch could not be pushed")
 
     open_prs = _list_sync_prs(repo_root)
-    if open_prs and notes:
+    if not open_prs:
         body_file = repo_root / ".sync-pr-body"
-        body_file.write_text(body, encoding="utf-8")
-        try:
-            _run(
-                ["gh", "pr", "edit", SYNC_BRANCH, "--body-file", str(body_file)],
-                cwd=repo_root,
-            )
-        finally:
-            body_file.unlink(missing_ok=True)
-    elif not open_prs:
-        body_file = repo_root / ".sync-pr-body"
-        body_file.write_text(body, encoding="utf-8")
+        body_file.write_text(PR_BODY, encoding="utf-8")
         try:
             _run(
                 [
@@ -720,6 +707,11 @@ def _publish_in_checkout(
             )
         finally:
             body_file.unlink(missing_ok=True)
+    if comment:
+        _run(
+            ["gh", "pr", "comment", SYNC_BRANCH, "--body", comment],
+            cwd=repo_root,
+        )
     if auto_merge:
         _run(
             ["gh", "pr", "merge", "--auto", "--squash", SYNC_BRANCH],
