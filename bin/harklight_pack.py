@@ -16,6 +16,7 @@ import tarfile
 import tempfile
 import tomllib
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -64,11 +65,14 @@ def _request(url: str, accept: str = "application/vnd.github+json") -> bytes:
             "User-Agent": "harklight-tightbeam-pack",
         },
     )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return response.read()
-    except Exception as error:
-        raise ApplyError("the public pack release could not be downloaded") from error
+    last_error: Exception | None = None
+    for _ in range(2):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read()
+        except Exception as error:
+            last_error = error
+    raise ApplyError("the public pack release could not be downloaded") from last_error
 
 
 def _load_pack_directory(directory: Path) -> Pack:
@@ -308,17 +312,14 @@ def _remove_election(manifest: str) -> str:
 
 
 def _toml_roles(identity: Path) -> dict[str, Path]:
-    result: dict[str, Path] = {}
-    for path in sorted((identity / "archetypes").glob("*.toml")):
-        try:
-            data = tomllib.loads(path.read_text(encoding="utf-8"))
-        except (OSError, tomllib.TOMLDecodeError) as error:
-            raise ApplyError("an installed archetype manifest cannot be read") from error
-        name = data.get("name")
-        if not isinstance(name, str) or name != path.stem:
-            raise ApplyError("an installed archetype has an unexpected identity")
-        result[name] = path
-    return result
+    return {path.stem: path for path in sorted((identity / "archetypes").glob("*.toml"))}
+
+
+def _edit_manifest(path: Path, edit: Callable[[str], str], text: str) -> str:
+    try:
+        return edit(text)
+    except ApplyError as error:
+        raise ApplyError(f"{error} ({path.name})") from error
 
 
 def _managed_guidance(identity: Path, pack: Pack) -> tuple[Path, str]:
@@ -356,14 +357,19 @@ def _planned_changes(identity: Path, pack: Pack) -> list[tuple[str, Path, str]]:
         if path is None:
             continue
         current = path.read_text(encoding="utf-8")
-        updated = _add_election(current)
+        updated = _edit_manifest(path, _add_election, current)
         if updated != current:
             changes.append((f"manifest:{role}", path, updated))
     for role, path in sorted(manifests.items()):
         if role in desired:
             continue
-        current = path.read_text(encoding="utf-8")
-        updated = _remove_election(current)
+        try:
+            current = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if ELECTION_MARKER not in current:
+            continue
+        updated = _edit_manifest(path, _remove_election, current)
         if updated != current:
             changes.append((f"manifest:{role}", path, updated))
     return changes

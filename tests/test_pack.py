@@ -574,6 +574,57 @@ class ApplyTests(unittest.TestCase):
             self.assertNotIn("HARKLIGHT_PACK_ELECTED", (identity / "archetypes" / "reviewer.toml").read_text(encoding="utf-8"))
             self.assertIn("harklight-agent", (identity / "archetypes" / "coder.toml").read_text(encoding="utf-8"))
 
+    def test_unrelated_manifests_do_not_block_apply_and_a_bad_target_is_named(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            identity = Path(temp) / "identity"
+            (identity / "guidance").mkdir(parents=True)
+            archetypes = identity / "archetypes"
+            archetypes.mkdir()
+            (archetypes / "coder.toml").write_text(
+                'name = "coder"\nskills = ["base"]\n', encoding="utf-8"
+            )
+            (archetypes / "default.toml").write_text(
+                'name = "default"\nskills = ["base"]\n', encoding="utf-8"
+            )
+            (archetypes / "odd.toml").write_text("not = [valid toml\n", encoding="utf-8")
+            (archetypes / "other.toml").write_text('name = "renamed"\n', encoding="utf-8")
+            pack = self._make_pack(Path(temp))
+            changes = harklight_pack._planned_changes(identity, pack)
+            self.assertEqual(
+                {kind for kind, _, _ in changes},
+                {"skill", "guidance", "manifest:coder", "manifest:default"},
+            )
+
+            (archetypes / "coder.toml").write_text('name = "coder"\n', encoding="utf-8")
+            with self.assertRaisesRegex(harklight_pack.ApplyError, r"coder\.toml"):
+                harklight_pack._planned_changes(identity, pack)
+
+    def test_download_is_retried_once(self) -> None:
+        class Response:
+            def __enter__(self) -> "Response":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return b"ok"
+
+        outcomes = [OSError("timed out"), Response()]
+
+        def fake_urlopen(request: object, timeout: float) -> Response:
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        with patch.object(harklight_pack.urllib.request, "urlopen", fake_urlopen):
+            self.assertEqual(harklight_pack._request("https://example.test/x"), b"ok")
+        outcomes[:] = [OSError("a"), OSError("b")]
+        with patch.object(harklight_pack.urllib.request, "urlopen", fake_urlopen):
+            with self.assertRaises(harklight_pack.ApplyError):
+                harklight_pack._request("https://example.test/x")
+
     def test_fresh_identity_can_receive_default_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             identity = Path(temp) / "identity"
