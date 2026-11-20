@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.3
+
+Apply now ignores unrelated archetype manifests and retries a failed download once. Manifests that apply edits still require a valid format and matching name.
+
+Reference sync reports source-shape changes for human review while retaining checks that prevent private sections from being published. Privacy checks accept public attribution and documentation examples while retaining private-name and non-public-address checks.
+
+Release publication now follows versioned merges to main. Generated sync pull requests still require human review.
+
+The skill documents revise/retract by session handle and settle by operation key for messages without a local send record, plus warnings for unresolved supersede targets. These command behaviors require the Tightbeam changes merged in PR #874; older installations may not support them.
+
+Compatibility: prior v0.1.2 apply/update evidence covered Tightbeam v0.1.16+4283 using checksum-verified archives via --source-dir. That is not v0.1.3 runtime verification. The default online update path and the new command behaviors against a real Harklight Agent have not been verified end-to-end. No new runtime compatibility claim is made for this release.
+
 ## v0.1.2
 
 Refreshed the Harklight skill from the allowlisted reference identity.
