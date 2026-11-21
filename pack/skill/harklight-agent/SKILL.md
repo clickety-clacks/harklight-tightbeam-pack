@@ -215,7 +215,10 @@ including explicit JSON null. Never use a feed revision as a reply target.
 A repeated terminal with the same item, state and timestamp is the same
 occurrence even when a later message revision includes it.
 
-The Server records delivery when serving a chat entry or terminal answer.
+The Server records Delivered while durably preparing a feed response, before
+writing the batch or event frame. A dropped connection can leave Delivered
+recorded while the complete event remains replayable from the last cursor.
+Act on complete records and deduplicate by the entry or terminal identity.
 Tightbeam records handed after its durable prompt-dispatched boundary. Read
 that outcome; a receipt does not prove the requested action happened. For an
 authorized standalone handoff or recovery, choose the receipt for the actual delivered
@@ -311,6 +314,11 @@ interrupted baseline and restart from the old committed cursor or a new snapshot
 Commit effects with their cursor. `caught_up` can advance a fully consumed empty
 batch; filtered revision gaps are normal. The CLI rebuilds an expired cursor
 from message pages and open-item entries/advisories before resuming.
+
+On batch `503 storage_unavailable`, one-shot `read` exits 1 with a diagnostic
+on stderr and keeps the checkpoint at its last completed output. `listen`
+retries from that position across 503, id-less `closing` events and incomplete
+frames; none of those advances the cursor.
 
 Advisories retain their subtype payload; not every advisory has text. Use
 `advisory-ack --item-id ID --advisory-id ID` for acknowledgment. Session end
