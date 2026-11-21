@@ -119,7 +119,8 @@ effect. Targets belong to the same enrolled agent and sender; duplicates are
 considered once in input order. Warnings `invalid`, `unknown` and `closed`
 leave those targets unchanged. Tightbeam exposes each target as a `supersedes`
 row with `messageId` and `effect`; a warning has `effect: "unchanged"` and
-`reason`. A different Tightbeam session can remain the
+`reason`. A missing legacy lookup yields local `effect: "unchanged"` with
+`reason: "unknown"`; the other targets proceed. A different Tightbeam session can remain the
 registered recipient; do not infer ownership from the caller.
 
 For pre-cutover references, retain the original sender and old message ID. The
@@ -154,7 +155,9 @@ harklight-agent progress --session "$HARKLIGHT_HANDLE" \
 Progress reads the content, revision and attachment metadata together. Its
 conditional PUT changes Progress while carrying the other message fields and
 omitting `file_ids`: the Server preserves the matched revision's attachments,
-including migrated inline files. Exact replay preserves both that omission and
+including migrated inline files. Read the updated manifest for the new
+revision's download IDs; preserving attachment bytes does not imply that an
+inline file keeps the same download ID. Exact replay preserves both that omission and
 `If-Match`. Do not rebase a pending write onto a newer revision.
 
 For raw general revision, `--clear-files` sends an empty list and clears the

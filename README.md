@@ -27,11 +27,13 @@ separately passed Progress preservation and exact legacy-selector checks against
 the same Server. That Server predates
 the final upload-discard patch, so those results do not establish discard acceptance.
 Tightbeam commands and wake fields follow [PR #886](https://github.com/clickety-clacks/tightbeam/pull/886)
-at `be4de64fe3a2b317470a032b43760f132b5e7218`. Its isolated component-author
-pairing used Agent `030d2cc` and Server `04e7b806`: Progress attachment retention
-and settlement after an ambiguous CLI result, chat/answer wakes, post-dispatch
-receipts and feed restart passed. This is distinct from the later Agent proofs
-and does not establish the final integrated release combination.
+at `3fb890e570f090527ee90e27bfdf8043d13265a3`. Its isolated component-author
+pairing used Agent `80065e0` and Server `04e7b806`: modern and migrated inline
+attachment bytes survived Progress settlement after an ambiguous CLI result;
+legacy-selector refusal, chat/answer wakes, post-dispatch receipts and feed
+restart also passed. New revisions can issue new inline download IDs. This
+does not establish the final integrated release combination or real-Server
+round 24 Delivered failure behavior.
 Before the 0.2 pack release, complete remaining paired acceptance,
 review the generated content, and name exact compatible versions in release notes.
 
