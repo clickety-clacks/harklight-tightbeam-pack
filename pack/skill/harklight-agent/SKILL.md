@@ -319,6 +319,9 @@ tightbeam harklight-settle --op-id "$HARKLIGHT_RECEIPT_OP_ID"
 ```
 
 Tightbeam retries that receipt against its saved matching Agent journal.
+If that journal certifies `operation_absent` for the exact saved operation,
+explicit settlement may start the saved receipt with its original ID.
+Unavailable, mismatched or ambiguous evidence keeps it pending.
 A new raw receipt operation does not settle the held operation. The raw receipt
 commands above are for standalone handoff, not this recovery path.
 
