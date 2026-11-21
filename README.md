@@ -16,13 +16,15 @@ compatible with protocol 0.1. Published v0.1.3 remains the old-protocol release;
 the source migration does not change that release or authorize a live update.
 
 The Agent command interface is pinned to source
-[1b96bc7](https://github.com/clickety-clacks/harklight-agent/commit/1b96bc7fa9d991c678a8bb86e254186fd8f9c5c2).
+[80065e0](https://github.com/clickety-clacks/harklight-agent/commit/80065e05e6d0a34a970146ff011330cd76cbd431).
 Server field semantics come from [#256](https://github.com/clickety-clacks/harklight-server/pull/256)
 at `2ecf51f` and [#270](https://github.com/clickety-clacks/harklight-server/pull/270)
 at `3511371`, including the attachment-preservation ruling. These are integration
 development references, not released deployment versions. Isolated paired
 verification at Agent `1b96bc7` and Server `04e7b806` passed Progress attachment
-preservation, lost-response recovery and concurrent feeds. That Server predates
+preservation, lost-response recovery and concurrent feeds. Agent `80065e0`
+separately passed Progress preservation and exact legacy-selector checks against
+the same Server. That Server predates
 the final upload-discard patch, so those results do not establish discard acceptance.
 Before the 0.2 pack release, confirm the Tightbeam interface and remaining paired acceptance,
 review the generated content, and name exact compatible versions in release notes.

@@ -105,6 +105,10 @@ registered recipient; do not infer ownership from the caller.
 
 For pre-cutover references, retain the original sender and old message ID. The
 Agent CLI resolves that pair to the opaque server item ID through protocol 0.2.
+Progress and current or historical `message-get` verify a cached candidate
+against the Server's sender and `legacy_message_id`; a modern send UUID is not
+a legacy selector. That UUID remains a valid ordinary Progress `--request`
+alias without `--sender-id`.
 When Progress identifies a legacy selector from `--sender-id` or its local
 journal, an exact lookup miss returns `404 not_found` and exit 2 without
 retargeting. Multiple matching legacy senders require an explicit `--sender-id`.
