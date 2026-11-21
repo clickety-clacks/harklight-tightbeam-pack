@@ -105,7 +105,8 @@ registered recipient; do not infer ownership from the caller.
 
 For pre-cutover references, retain the original sender and old message ID. The
 Agent CLI resolves that pair to the opaque server item ID through protocol 0.2.
-Raw Agent `--supersedes` takes item IDs; `--supersedes-local` explicitly resolves
+An explicit legacy Progress lookup with no match returns `404 not_found`
+and exit 2; it must not select another item. Raw Agent `--supersedes` takes item IDs; `--supersedes-local` explicitly resolves
 a local reference by sender. Keep Tightbeam's existing association without a
 second mapping or old transport fallback.
 
@@ -167,7 +168,12 @@ Do not substitute an ID read from a replacement journal after a failure.
 
 Exit 0 confirms success; 1 is a local setup/journal/operation conflict; 2 is a
 definite Server refusal; 5 means unsupported; 7 means unresolved or retryable.
-Read the structured outcome and stderr reason, not just the exit code. Preserve
+Read the structured outcome and stderr reason, not just the exit code. A
+successful HTTP response that fails validation leaves the write unresolved
+under its original operation key. On a rejected or uncertain Server response,
+`request_id`, when present, is the Server Request-Id; a successful send's
+`request_id` is its local operation reference matching `op_id`. Preserve that
+distinction when reporting a failure. Preserve
 a pending intent when its journal is unavailable or mismatched. Only an intact,
 matching journal's `operation_absent` establishes that it has no such intent;
 `operation_unresolved` does not. Abandoning local recovery cannot undo a Server
