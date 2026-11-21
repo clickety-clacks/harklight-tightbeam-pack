@@ -105,8 +105,12 @@ registered recipient; do not infer ownership from the caller.
 
 For pre-cutover references, retain the original sender and old message ID. The
 Agent CLI resolves that pair to the opaque server item ID through protocol 0.2.
-An explicit legacy Progress lookup with no match returns `404 not_found`
-and exit 2; it must not select another item. Raw Agent `--supersedes` takes item IDs; `--supersedes-local` explicitly resolves
+When Progress identifies a legacy selector from `--sender-id` or its local
+journal, an exact lookup miss returns `404 not_found` and exit 2 without
+retargeting. Multiple matching legacy senders require an explicit `--sender-id`.
+This mapping identifies only the parent item; old wake IDs and cursors do not
+map to protocol 0.2 chat entry IDs or terminal occurrences.
+Raw Agent `--supersedes` takes item IDs; `--supersedes-local` explicitly resolves
 a local reference by sender. Keep Tightbeam's existing association without a
 second mapping or old transport fallback.
 
