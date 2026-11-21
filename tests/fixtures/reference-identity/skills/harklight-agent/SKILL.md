@@ -19,7 +19,7 @@ Use the identity already granted to the current session.
 
 Use the operation that matches the change.
 
-## Read results and settle an uncertain send
+## Read results and settle an uncertain write
 
 Read the actual operation result before claiming success.
 
@@ -27,9 +27,9 @@ Read the actual operation result before claiming success.
 
 Read only messages for the current sender.
 
-## Handle a delivered entry
+## Handle a delivered change
 
-Read and acknowledge the exact delivered event.
+Use the chat entry ID for reply correlation and the item ID for an answer.
 
 ## Raw command recovery and references
 

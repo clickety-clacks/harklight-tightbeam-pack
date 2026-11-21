@@ -1,335 +1,437 @@
 ---
 name: harklight-agent
-description: Send authorized Harklight notices, decisions, or questions from Tightbeam and handle replies or chat in the originating session. Use for Harklight communication, including from remote hosts.
+description: Send authorized Harklight notices, decisions, or questions from Tightbeam and handle replies or chat using protocol 0.2. Use for Harklight communication, including from remote hosts.
 ---
 
 <!-- HARKLIGHT_PACK_MANAGED -->
 
 # Harklight for Tightbeam agents
 
-> Follow the installed Tightbeam and Harklight help for exact options.
+This skill targets protocol 0.2: Harklight Server, Agent, app and web 0.2.x,
+with the matching Tightbeam Harklight integration. It does not support protocol
+0.1. Use the organization's configured enrollment and the installed help for
+its execution context.
+
+The commands below target the source revisions linked in the repository README.
+Tightbeam's protocol 0.2 integration must be installed with the matching Agent
+and Server before using them. Source verification does not establish that an
+existing installation supports these commands.
 
 ## Automatic lifecycle for your own messages
 
-From your authenticated Tightbeam session, send through
-`tightbeam harklight-send`, retain the plain message ID, and end the turn.
-When the send commits, it automatically subscribes the originating session;
-a reply or chat on its message wakes the same session with the actual entry.
-This Tightbeam send route needs no polling or manual wake.
-Tightbeam owns listening. Do not start an agent-owned `listen --next` or
-`listen --follow`, or substitute another agent for the origin.
+Send through `tightbeam harklight-send` from your authenticated Tightbeam
+session. A committed registered send opens automatic wake delivery. Retain its
+server item ID, conversation handle, sender and operation ID. A conversation
+handle is not a Tightbeam session key. End the turn and handle the resulting
+wake; no polling or separate waiter is needed.
 
-The distinct message-management operations also manage wakes automatically:
+Tightbeam owns its wake routing and handoff receipts. Other readers may open
+the same filtered feed concurrently. There is no exclusive listener, takeover,
+cover or attach operation. A terminal answer does not close the conversation:
+chat replies can continue after an answer or retraction when a conversation
+exists. A raw feed does not replace Tightbeam's registered routing.
 
-- A committed retraction withdraws one message and cancels its future wakes.
-- A committed revision updates one message in place and keeps its subscription
-  under the same message ID.
-- A committed superseding send opens one subscription for its new message and
-  cancels future wakes on the sending session's successfully superseded old
-  messages. Warnings and other sessions' subscriptions are handled below.
-
-The contract ends every subscription when the conversation completes; a
-terminal answer alone does not establish conversation completion or listener
-cleanup. The existing proof does not expose per-message unsubscribe. Only a
-confirmed commit changes wakes, at most once. A minted message ID is returned
-even for an uncertain or refused send; it does not by itself establish that the message
-was sent or subscribed. A failure before an ID was minted explains why no send
-happened. Never fabricate an ID.
-
-Revision and supersession are different operations. Do not alias supersede to
-revise or emulate missing Harklight behavior locally. If the required server
-or CLI operation is unavailable, report the gap to the Harklight owner.
-
-Tightbeam owns this subscription and wake integration. Standalone Agent 0.1.5
-rejects its native Codex listen route; its one-shot `read` can retrieve entries
-without a listener, followed by inspect, ACK and reply/result. That is separate
-from Tightbeam delivery. Neither a standalone support declaration nor a queued
-wake establishes same-session delivery. Do not add a raw waiter or read loop
-to a Tightbeam subscription.
-
-Choose the message form that fits the user's task. Informational updates use
-an explicit **Seen** acknowledgment. Decisions use structured choices with
-meaningful labels and stable values, plus a text reply when useful. Open
-questions use a text reply. Do not put numbered choices only in the body and
-require the person to type an option. Opening a message never counts as Seen
-or as a response. Include the product in the title when using the shared sender.
+A committed revision keeps the subscription on the same item. A committed
+retraction ends future wakes for that item. Preserve any pre-commit delivery
+marker on an entry that arrives later; retraction does not undo prior effects.
+Only a confirmed commit establishes the corresponding wake effect.
 
 ## Configuration and sending
 
-Use the existing enrolled identity and its granted sender ID through the
-configuration route established for the command's actual execution context.
-Do not infer the gateway's configuration from an agent shell, or assume raw
-post-wake commands share the gateway's identity, CA, origin port or journal.
+Use the configuration established for the command's execution context. Raw
+Agent commands and the gateway need not share an identity directory, CA,
+endpoint or journal. Preserve an actual failure for the service owner; do not
+copy credentials or change live configuration to make an example work.
 
-Origin, dashboard and relay ports are distinct; never guess one from another.
-If a command cannot run, preserve its actual error and execution context for
-the existing service owner. Do not infer a configuration deficiency, create
-another identity, copy private keys, or change the live service environment to
-make it work. Keep the existing journal for recovery.
+Agent 0.2 uses the enrolled device endpoint. For a migrated identity whose saved
+port still points to enrollment, its configured device port can be selected
+with `--device-port` or `HARKLIGHT_DEVICE_PORT`. New enrollments store device
+and enrollment ports separately. Do not infer one port from another.
 
-Send from your authenticated local Tightbeam session:
+Send a question through Tightbeam:
 
 ```sh
 tightbeam harklight-send --session new --sender-id "$HARKLIGHT_SENDER" \
-  --title "Product: choose the next step" \
+  --type request --title "Product: choose the next step" \
   --body "Select an option or write a note." \
-  --choices-json '["Proceed", "Defer"]'
+  --choices-json '["Proceed", "Defer"]' --reply
 ```
 
-`HARKLIGHT_SENDER` here is the sender ID already granted to the enrollment.
-The choice array contains strings; each exact label is its returned value.
-Omit `--choices-json` for an open text question. Keep the printed plain
-`messageId` for later Tightbeam commands. `--message` takes that ID;
-Tightbeam uses its recorded Harklight handle and sender, so you do not supply
-them again. Keep the result's `opId` when present for an uncertain outcome's
-record. A Harklight handle, when reported, identifies the conversation and is
-not a Tightbeam session key.
+Use the sender already granted to the enrollment. Keep the returned
+`messageId`, `handle`, `senderId` and `opId` when present. The server issues the
+item ID; an uncertain send can lack it. Preserve the operation ID instead of
+inventing an item ID. Inspect the outcome and wake effect before claiming the
+message was sent. Tightbeam output fields use camelCase; the nested `result`
+retains the Agent record's snake_case fields, such as `item_id` and
+`session_handle`.
 
-Tightbeam supplies the controller route. Do not add raw CLI `--route` or
-`--controller` flags to `tightbeam harklight-send`. Its `--files-json` takes
-an array of file paths. Files use the server's published limits and verified
-transfer; preserve a failed draft with all attachments rather than silently
-dropping files. Use the installed command's `--help` for supported inputs.
+Use `--type request` with `--choices-json` for decisions or `--reply` for an
+open question. Use `--type fyi` for a Seen-only informational update. Opening
+a message is not Seen or an answer. Put the product in the title when sharing
+a sender.
 
-The current Tightbeam send command has no informational/Seen flag. Use the
-existing notice helper below when that is the required message form; do not
-invent a flag or represent a text reply as Seen.
+Create a Progress item through Tightbeam:
+
+```sh
+tightbeam harklight-send --session new --sender-id "$HARKLIGHT_SENDER" \
+  --title "Product: work in progress" --progress 10 --progress-stage "Build"
+```
+
+Progress creation defaults to FYI. Update the same returned item:
+
+```sh
+tightbeam harklight-progress --message "$HARKLIGHT_ITEM" \
+  --percent 50 --stage "Verification"
+```
+
+Tightbeam's `--files-json` accepts file paths. Raw Agent reply uses `--file`
+for a path or `--file-id` for an upload handle. Preserve failed attachments
+rather than silently dropping them.
 
 ## Revise, retract or supersede
 
-Proactively keep conversations current as work changes, so the person is
-not left answering stale questions. Useful ways to do this include revising
-the same open request when only its details need correction, superseding it
-when a new request replaces it, and retracting an outstanding request that is
-obsolete, canceled or no longer needs an answer. Use judgment about when an
-update helps and stay within the task's existing authority; these examples
-are not an exhaustive checklist or a requirement to mutate every message.
-
-Preserve useful history and already received answers. Retraction withdraws a
-request; it does not undo an action already taken. Do not use a replacement to
-bypass a terminal refusal. Read the actual operation result and follow this
-skill's operation-specific uncertainty handling, including supported
-same-operation recovery for unresolved sends, before claiming that a request
-was updated, withdrawn or replaced. An uncertain outcome is not confirmed cleanup.
-
-In these examples, `HARKLIGHT_MESSAGE_ID` is the plain ID returned by the send.
-To revise that message in place, supply its current base revision and title:
+Revise an existing item with its actual current content revision:
 
 ```sh
-tightbeam harklight-revise --message "$HARKLIGHT_MESSAGE_ID" \
-  --base-revision 1 --title "Product: updated request" \
+tightbeam harklight-revise --message "$HARKLIGHT_ITEM" \
+  --base-revision "$HARKLIGHT_REVISION" --title "Product: updated request" \
   --body "The revised details."
 ```
 
-Use the actual base revision. The command also accepts `--choices-json` and
-`--clear-choices`. A committed revise reports the new `revision` and
-`wakeEffect: "kept"`. A stale base revision is refused with Harklight's reason
-and current revision; the subscription stays unchanged.
-
-To withdraw one message:
+To withdraw an obsolete request, use retraction. It withdraws the item and ends
+its future wakes; it is a separate action from revision:
 
 ```sh
-tightbeam harklight-retract --message "$HARKLIGHT_MESSAGE_ID"
+tightbeam harklight-retract --message "$HARKLIGHT_ITEM"
 ```
 
-A committed retract reports `wakeEffect: "ended"`. It stops wakes for entries
-captured after the commit, leaving other messages on the same handle alone.
+Use the Tightbeam lifecycle commands for registered items so its wake effects
+remain associated with the operation. Raw Agent writes do not complete that
+association. For an item without a Tightbeam send record, supply
+`--session "$HARKLIGHT_HANDLE"` to revise or retract. Either command can add
+`--in-reply-to "$HARKLIGHT_ENTRY"` for the current person chat; Tightbeam saves
+that correlation with the operation. Do not turn a refusal into an implicit
+replacement request.
 
-To replace one or more messages with a new message, repeat `--supersedes` once
-per replaced ID on a new send:
+To replace requests, repeat `--supersedes` on a new Tightbeam send. Read every
+per-target result: only targets actually superseded get the corresponding wake
+effect. Targets belong to the same enrolled agent and sender; duplicates are
+considered once in input order. Warnings `invalid`, `unknown` and `closed`
+leave those targets unchanged. Tightbeam exposes each target as a `supersedes`
+row with `messageId` and `effect`; a warning has `effect: "unchanged"` and
+`reason`. A missing legacy lookup yields local `effect: "unchanged"` with
+`reason: "unknown"`; the other targets proceed. A different Tightbeam session can remain the
+registered recipient; do not infer ownership from the caller.
+
+For pre-cutover references, retain the original sender and old message ID. The
+Agent CLI resolves that pair to the opaque server item ID through protocol 0.2.
+Progress and current or historical `message-get` verify a cached candidate
+against the Server's sender and `legacy_message_id`; a modern send UUID is not
+a legacy selector. That UUID remains a valid ordinary Progress `--request`
+alias without `--sender-id`.
+When Progress identifies a legacy selector from `--sender-id` or its local
+journal, an exact lookup miss returns `404 not_found` and exit 2 without
+retargeting. Multiple matching legacy senders require an explicit `--sender-id`.
+This mapping identifies only the parent item; old wake IDs and cursors do not
+map to protocol 0.2 chat entry IDs or terminal occurrences. The initial v2
+baseline is independent of historical wake rows; a retained event served again
+at cutover can produce a new wake. Reconcile earlier effects before acting.
+Raw Agent `--supersedes` takes item IDs; `--supersedes-local` explicitly resolves
+a local reference by sender. Keep Tightbeam's existing association without a
+second mapping or old transport fallback.
+
+Raw Agent revision can optionally correlate to a person chat entry on the item
+at its current request revision. Success returns the message and acted entry;
+wrong item or kind returns `404 not_found`, and an earlier-revision turn returns
+`409 stale_request`. Preserve the exact entry ID during recovery.
+
+For a raw Agent Progress update, use the actual conversation handle and item:
 
 ```sh
-tightbeam harklight-send --session new --sender-id "$HARKLIGHT_SENDER" \
-  --title "Product: replacement request" --body "Use these updated details." \
-  --supersedes "$HARKLIGHT_OLD_ID_1" --supersedes "$HARKLIGHT_OLD_ID_2"
+harklight-agent progress --session "$HARKLIGHT_HANDLE" \
+  --request "$HARKLIGHT_ITEM" --percent 50 --stage "Verification"
 ```
 
-Keep the new message ID. Read the result's `supersedes` list: each distinct
-listed ID appears once, in the given order. A Harklight warning such as
-`invalid`, `unknown` or `closed` leaves that target's subscription unchanged
-and is reported verbatim; it need not prevent the new send from committing.
-The per-target effect is `unchanged` for such a warning or `ended` for the
-sender's superseded message whose future wakes are canceled.
-Successfully superseded messages of the sending session cancel future wakes
-at commit. Tightbeam acknowledges their self-caused closing terminals without
-waking the agent; their subscriptions end when that acknowledgment is recorded.
-`acknowledgment: "pending"` means wakes are canceled but acknowledgment is
-pending. `acknowledged` means that acknowledgment was recorded.
-`not_needed` means the conversation completed before the terminal was captured: the
-subscription ended without an acknowledgment attempt, then or after restart.
-The result reports the state recorded when it returns, not a later state.
-`failed` includes the reason and reports the old subscription still
-open, with no wake for that terminal and no automatic acknowledgment retry.
-The agent may acknowledge that exact entry with raw `harklight-agent`.
-Pending acknowledgments survive restart and finish once without a duplicate;
-conversation completion ends the subscription if no terminal needs acknowledgment.
+Progress reads the content, revision and attachment metadata together. Its
+conditional PUT changes Progress while carrying the other message fields and
+omitting `file_ids`: the Server preserves the matched revision's attachments,
+including migrated inline files. Read the updated manifest for the new
+revision's download IDs; preserving attachment bytes does not imply that an
+inline file keeps the same download ID. Exact replay preserves both that omission and
+`If-Match`. Do not rebase a pending write onto a newer revision.
 
-Eligible revise, retract, settle and supersede actions are not refused merely
-because another session sent the message. Harklight's existing authority
-decides whether they apply; the original sender remains the wake recipient.
-For a superseded target held by another session, `other_session` leaves its
-subscription under the existing delivery rules so that session receives the
-Harklight `superseded` terminal once and acknowledges it. Tightbeam does not
-synthesize a terminal Harklight did not emit. `no_subscription` means the
-superseded target has no Tightbeam send record. Revise or retract instead uses
-the target's recorded handle and sender; a committed change affects that
-subscription. A cross-session retract does not promise a notice to its sender.
+For raw general revision, `--clear-files` sends an empty list and clears the
+attachments. A nonempty `--file-id` list replaces the entire set and may mix
+new upload handles with download IDs already attached to that same item.
+Other writes taking file IDs require upload handles. A stale revision returns
+412; a terminal item refuses revision/retraction with `already_closed`, or
+`already_retracted` when retracted.
 
-If `--message` names no Tightbeam send record (for example a message sent with
-raw `harklight-agent`), `harklight-revise` and `harklight-retract` still reach
-Harklight when you add `--session <handle>`, the Harklight session the message
-was sent in. `harklight-settle` does the same with `--op-id <key>`, the
-Harklight operation to retry. Harklight alone decides whether the change is
-allowed; Tightbeam adds no permission check. Because Tightbeam has no
-subscription for that message, it changes no wake or subscription state and the
-result says so: `wakeEffect: "none"`, `subscriptionEffect: "none"` and a note
-beginning "no subscription effect". Without the needed flag the command refuses
-without a Harklight operation and names the flag. If the message does have a
-Tightbeam send record, behavior is unchanged, and a `--session` or `--op-id`
-that contradicts the record is refused. Raw revise/retract bypass Tightbeam's
-automatic wake effects; use the Tightbeam commands for the lifecycle described
-here.
+## Read results and settle an uncertain write
 
-## Read results and settle an uncertain send
+Distinguish committed, refused and uncertain operations. Keep the original
+operation key, finalized payload, correlation entry, base revision and file
+semantics. A successful replay returns the stored success. A failed precondition
+is not authority to prepare a new write against newer content.
 
-Read `outcome` and `wakeEffect`, not just the message ID. `committed` confirms
-the operation; `refused` means it was not applied; `outcome_unknown` means it
-may or may not have applied; `failed` means the operation did not reach
-Harklight. Non-committed outcomes exit nonzero and still report their fields
-and a plain reason. `command` identifies `send`, `revise`, `retract` or
-`settle`. Wake effects are `subscribed`, `kept`, `ended` or `none`.
-Results include `messageId` when minted, `senderId` and `handle` when known,
-`opId` when assigned, and the new `revision` for a committed revise.
-
-An `outcome_unknown` send is pending and unregistered: no subscription is open
-yet, and its ID is information only until the send is settled. Revise or retract
-naming that unresolved ID is refused, with no Harklight operation or wake
-effect. A superseding send that names it among other targets is not refused:
-the valid targets are superseded, and the unresolved one is reported as an
-`unchanged` target with a reason, like the targets Harklight warns about. A
-superseding send whose only target is the unresolved ID is refused as a whole.
-Settle that send explicitly:
+For an uncertain Tightbeam send without a server item ID, settle the saved
+operation by its returned `opId`:
 
 ```sh
-tightbeam harklight-settle --message "$HARKLIGHT_MESSAGE_ID"
+tightbeam harklight-settle --op-id "$HARKLIGHT_OP_ID"
 ```
 
-This runs the existing same-operation recovery once, using the recorded op ID
-and unchanged inputs. It creates no new send or prepare. If it confirms commit,
-the original sender's subscription and any supersede effects are applied once.
-If it establishes refusal, the result says the message was not sent. If still
-unresolved, it says so, reports `wakeEffect: "none"`, and revise and retract on
-the ID remain refused; a supersede that also names other targets still proceeds
-and warns for it. You may explicitly settle it again; do not put settle
-in a timer, poll or retry loop. You can also leave it for existing recovery at
-the next gateway start. Tightbeam does not otherwise retry it automatically.
-An already-settled ID is refused without a Harklight operation, with its
-settled outcome. An ID Tightbeam has no record of is settled only with
-`--op-id`, as described above; without it the command refuses and names the flag. After settlement,
-ordinary lifecycle commands apply according to the established message state.
+For a recorded unresolved revision, retraction or Progress update, select its
+saved operation by item:
 
-An uncertain revise or retract leaves the subscription as it was and applies
-no wake effect. The change may or may not have reached Harklight. Tightbeam
-does not recover or automatically retry that operation, including at restart;
-the agent may explicitly issue the same command again as a new operation with
-its own result. A later committed retract or supersede, or conversation
-completion, ends the subscription. `harklight-settle` is for unresolved sends,
-not for recovering revise or retract outcomes.
+```sh
+tightbeam harklight-settle --message "$HARKLIGHT_ITEM"
+```
 
-A committed retract or supersede reports `pendingDelivery` entries by message
-ID and entry identity, captured before its commit and not yet delivered. Each
-still arrives once, including
-across restart, marked as received before retraction or before supersession
-by the named replacement ID. The marker accompanies the entry even if its
-wake was already queued or sealed for delivery. Tightbeam does not acknowledge human replies or chat
-for the agent. Handle the delivered entry below; do not mistake its later
-arrival for a new post-commit reply or repeat its effect. Entries captured
-after the ending commit do not wake the session.
+A settled Progress update reports `settledCommand: "revise"` and the successful
+`revision`. For an item with no Tightbeam send or change record, settlement
+requires both `--message EXTERNAL_ITEM` and the Agent `--op-id OP`; it creates
+no wake or subscription. A standalone operation ID must identify a saved send
+or paused handoff receipt; an unknown ID is refused.
+Do not substitute raw Agent retry for Tightbeam settlement: a raw success does
+not finish Tightbeam's item binding or wake effects.
+
+Before the raw write, read and retain its journal identity from the same
+execution context:
+
+```sh
+harklight-agent journal-id
+```
+
+Retain the returned `journal_id` alongside the operation ID. To recover that
+raw operation, qualify retry with the original journal ID, particularly when
+an absence result would affect your next action:
+
+```sh
+harklight-agent retry --op-id "$HARKLIGHT_OP_ID" \
+  --journal-id "$HARKLIGHT_JOURNAL_ID"
+```
+
+Do not substitute an ID read from a replacement journal after a failure.
+
+Exit 0 confirms success; 1 is a local setup/journal/operation conflict or an
+internal fault on a read or feed; 2 is a definite Server refusal; 5 means
+unsupported; 7 means unresolved or retryable. An explicit `retryable: false`
+requires manual recovery rather than an automatic retry.
+Read the structured outcome and stderr reason, not just the exit code. A
+successful HTTP response that fails validation leaves the write unresolved
+under its original operation key. On a rejected or uncertain Server response,
+`request_id`, when present, is the Server Request-Id; a successful send's
+`request_id` is its local operation reference matching `op_id`. Preserve that
+distinction when reporting a failure. Preserve
+a pending intent when its journal is unavailable or mismatched. Only an intact,
+matching journal's `operation_absent` establishes that it has no such intent;
+`operation_unresolved` does not. Abandoning local recovery cannot undo a Server
+write. Do not use a new send to discover whether an old send committed.
+
+A journaled write receiving `500 internal_error` exits 7 with one
+`outcome_unknown` stdout record. It retains the original `operation` and
+`op_id`, and carries `status: 500`, `error: "internal_error"`,
+`retryable: false` and `request_id` when available. It may already have committed.
+Keep its original journal, operation, payload and precondition. Record the
+operation, token and Request-Id, then use authoritative readback or explicitly
+settle that saved operation on user action. Do not start a retry loop or issue
+a replacement send. Tightbeam keeps the paused operation through restart;
+automatic recovery does not settle it.
+
+For HTTP failures, Request-Id comes from the response header, with error-body
+`request_id` as fallback; it is absent if both are unavailable. Each explicit
+retry reports the Request-Id of that attempt while retaining the original
+operation key.
 
 ## Read one of your own sent messages
 
-Agent 0.1.9 or newer can read one of this origin's messages from a compatible
-Server by its sender and message IDs:
-
 ```sh
-harklight-agent message-get --sender-id S --message-id M
-harklight-agent message-get --sender-id S --message-id M --revision N
+harklight-agent message-get --item-id "$HARKLIGHT_ITEM"
+harklight-agent message-get --item-id "$HARKLIGHT_ITEM" --revision 2
+harklight-agent message-entries --item-id "$HARKLIGHT_ITEM" --limit 50
 ```
 
-Use the `senderId` and `messageId` from the send result. Omit `--revision` to
-read the latest version; use it to select a retained revision. This read does
-not mark the message Seen, acknowledge an event or update the local journal.
-`revision_unavailable` means the requested revision is no longer retained; it
-is gone. It does not retrieve replies; those arrive through the wake below.
+The current read returns `{rev,message}`; a historical read returns
+`{rev,revision:{request_revision,message,files}}`. An unavailable historical
+revision returns `404 not_found`. Content revision, resource version, feed
+position and immutable entry position serve different purposes. A read does
+not mean Seen, handed or acted. To resolve a migrated reference, use
+`message-get --sender-id NAME --message-id OLD_ID`.
 
-## Handle a delivered entry
+`FileCreated.file_id` is an upload handle for writes/discard. `FileRef.file_id`
+on attached content is the download ID; downloading by upload handle fails.
+Revise's same-item reuse is the specific exception described above.
 
-Read the wake's entry and handling instructions. Correlate the exact handle,
-sender/message identity, request revision and event ID. Use `entry.kind` and
-`entry.author` to distinguish discussion from terminal answers. The variables
-below stand for the values in that entry; `HARKLIGHT_REQUEST` is its request's
-message ID. Run the current raw commands from the originating session using
-the configuration route confirmed for that execution context. Report an actual
-command failure to its owner instead of assuming a route, copying credentials
-or creating a replacement.
+## Handle a delivered change
 
-```sh
-harklight-agent ack --session "$HARKLIGHT_SESSION" --event "$HARKLIGHT_EVENT"
+The source wake prompt starts with JSON; a notice batch may wrap it. These
+excerpts show the snake_case fields used for a chat and an answer:
+
+```jsonl
+{"kind":"entry","session_handle":"HANDLE","item_id":"ITEM","rev":12,"data":{"entry_id":"ENTRY","item_id":"ITEM","kind":"reply","author":"person","text":"Please continue"}}
+{"kind":"message","session_handle":"HANDLE","item_id":"ITEM","rev":13,"data":{"item_id":"ITEM","terminal":{"state":"answered","at_ms":1700000000000,"answer":null}}}
 ```
 
-Explicitly acknowledge before acting. Printing the entry is not an
-acknowledgment. Check prior effects before repeating an action on a redelivery;
-an acknowledgment alone does not establish that the action happened.
+Use `item_id` and chat `data.entry_id` with the Agent. Local `event_id` and
+`feed_cursor` identify Tightbeam wake provenance; they are not Agent reply IDs
+or the Server feed revision. The full record also carries `request`,
+`request_revision` and normalized `entry`.
 
-For a person discussion, reply to the exact request and event:
+Read the wake's actual item, handle, entry and revision identities. A chat
+change carries a real entry ID. An answer or close-out is a message change
+with a terminal, not a synthetic conversation entry. Preserve the raw answer,
+including explicit JSON null. Never use a feed revision as a reply target.
+A repeated terminal with the same item, state and timestamp is the same
+occurrence even when a later message revision includes it.
+
+The Server records Delivered while durably preparing a feed response, before
+writing the batch or event frame. A dropped connection can leave Delivered
+recorded while the complete event remains replayable from the last cursor.
+Act on complete records and deduplicate by the entry or terminal identity.
+Tightbeam records handed after its durable prompt-dispatched boundary. Read
+that outcome; a receipt does not prove the requested action happened. For an
+authorized standalone handoff or recovery, choose the receipt for the actual delivered
+change. For a person chat entry:
 
 ```sh
-harklight-agent reply --session "$HARKLIGHT_SESSION" \
-  --request "$HARKLIGHT_REQUEST" --in-reply-to "$HARKLIGHT_EVENT" \
-  --body "The request is complete."
+harklight-agent receipt --item-id "$HARKLIGHT_ITEM" --entry-id "$HARKLIGHT_ENTRY"
 ```
 
-Use a body that states the actual outcome. A conversation reply is not a
-terminal answer or a grant of new authority. Receiving discussion after a
-terminal does not prove that replying is still allowed: the recorded later
-discussion was delivered and acknowledged, but reply was refused because the
-request was closed. Preserve that refusal; do not reopen or send a replacement
-merely to answer it. For an `answered`
-terminal, reconcile earlier effects before applying its authorized outcome
-at most once, then report its disposition:
+For an answer, which has no conversation entry ID, use the item receipt instead:
 
 ```sh
-harklight-agent result --session "$HARKLIGHT_SESSION" \
-  --request "$HARKLIGHT_REQUEST" --in-reply-to "$HARKLIGHT_EVENT" \
-  --status applied
+harklight-agent receipt --item-id "$HARKLIGHT_ITEM"
 ```
 
-Use `applied` only when the effect is established, `refused` when it cannot be
-applied, or `received` when the outcome remains uncertain. If an earlier
-attempt may have taken effect, check it before acting again. Keep the original
-event, request and revision identities. Cleared, expired or superseded
-terminals stop work on that request and are not approval. Retraction ends the request; do not
-answer it, report a result or reopen it implicitly.
+These are alternative targets, not a sequence to run for one handoff. Preserve
+`--agent` and `--rerouted` attribution where applicable. `--not-handed REASON` supplies the required reason for failed handoff. Read `response.status` (`recorded`, `already_recorded`, `superseded`)
+and effective `stage_outcome`. A handed outcome stays handed; a not-handed
+outcome may advance to handed. Delivery is nested in the entry or terminal,
+not a top-level message flag.
 
-For received files, inspect each local path and transfer outcome. Transfer
-does not prove this session read the file. After acknowledgment, report
-`harklight-agent file-use` with the exact session, event and file and either
-`--used` or `--unusable --reason`. Do not claim use for `not_transferred` files.
+A Tightbeam automatic handoff receipt can also pause on `internal_error`.
+The attributed handoff recipient can explicitly recover the saved receipt
+using its operation ID from the error log:
+
+```sh
+tightbeam harklight-settle --op-id "$HARKLIGHT_RECEIPT_OP_ID"
+```
+
+Tightbeam retries that receipt against its saved matching Agent journal.
+If that journal certifies `operation_absent` for the exact saved operation,
+explicit settlement may start the saved receipt with its original ID.
+Unavailable, mismatched or ambiguous evidence keeps it pending.
+A new raw receipt operation does not settle the held operation. The raw receipt
+commands above are for standalone handoff, not this recovery path.
+
+Reply to a person chat in its existing conversation:
+
+```sh
+harklight-agent reply --item-id "$HARKLIGHT_ITEM" \
+  --in-reply-to "$HARKLIGHT_ENTRY" --body "The request is complete."
+```
+
+Use the actual outcome as the body. Correlation requires a person chat turn on
+that item at its current request revision. The first correlated reply marks it
+acted; further replies are legal. An uncorrelated reply is an ordinary agent
+turn. A reply may contain only files: omit `--body` and pass `--file PATH`.
+Conversation discussion is not itself new authority.
+
+For an answered terminal, reconcile earlier effects before acting and report
+the actual result:
+
+```sh
+harklight-agent result --item-id "$HARKLIGHT_ITEM" --status applied
+```
+
+Use `applied` only for an established effect, `refused` when it cannot be applied,
+or `received` while unresolved. The reference derives from the operation; no
+explicit result reference or conversation entry ID is supplied. A sessionless
+answer remains visible but answer handoff/result returns `400 unsupported`.
+A session-bound item without an answer returns `409 not_answered`; a final or
+incompatible result returns `409 already_closed`. Cleared, expired or superseded
+outcomes stop work on that request and are not approval.
+
+Report each file's actual transfer and use independently of handoff:
+
+```sh
+harklight-agent file-get --file-id "$HARKLIGHT_FILE" --output "$HARKLIGHT_PATH"
+```
+
+After the download succeeds, report the transfer:
+
+```sh
+harklight-agent file-use --item-id "$HARKLIGHT_ITEM" \
+  --entry-id "$HARKLIGHT_ENTRY" --file-id "$HARKLIGHT_FILE" --transferred
+```
+
+After actually using that file, report use separately:
+
+```sh
+harklight-agent file-use --item-id "$HARKLIGHT_ITEM" \
+  --entry-id "$HARKLIGHT_ENTRY" --file-id "$HARKLIGHT_FILE" --used
+```
+
+The file must belong to that delivered turn. Use `--not-transferred --reason`
+for a failed transfer, or `--unusable --reason` for failed use. Successful-only
+reports omit the reason; when both dimensions fail in one write its reason
+applies to both. An identical report is a duplicate. A conflict in either
+outcome or reason refuses the whole write. A later use report can follow a
+failed transfer without rewriting that transfer. Downloading does not prove use.
 
 ## Raw command recovery and references
 
-Preserve the original operation UUID and journal. An uncertain operation is
-not a refusal; do not send another message to discover whether it committed.
-Use `tightbeam harklight-settle` for an unresolved Tightbeam send; a raw CLI
-retry receipt does not establish Tightbeam's binding or wake effects. Keep
-the current raw `harklight-agent ack/reply/result` handling after a wake;
-there is no Tightbeam reply verb.
+Tightbeam's feed handles its automatic wake routing. For standalone reading:
 
-For a raw acknowledgment/reply/result operation that reports an uncertain
-outcome and an operation ID, recover that same operation
-with `harklight-agent retry --op-id "$HARKLIGHT_OP_ID"`. Do not apply an action
-bound to an older request revision. This raw recovery instruction does not
-apply to Tightbeam lifecycle commands and does not authorize automatic retries
-or a retry loop.
+```sh
+harklight-agent read --session "$HARKLIGHT_HANDLE" --snapshot
+harklight-agent listen --session "$HARKLIGHT_HANDLE" --after "$HARKLIGHT_REV" --follow
+```
 
-For raw commands outside Tightbeam, consult the installed Harklight Agent skill and its help. This skill covers Tightbeam-managed subscriptions and wakes.
+Durable change kinds are `message`, `entry` and `advisory`. Focus is ephemeral.
+Multiple readers can use one scope. The default reader saves its checkpoint
+after writing the corresponding output; a restart can repeat output. This is
+not a checkpoint for a consumer's later effects. A caller that commits effects independently
+uses its own `--after` checkpoint or `--snapshot`, regardless of another reader's
+cursor. A baseline is provisional until `baseline_complete`; discard an
+interrupted baseline and restart from the old committed cursor or a new snapshot.
+Commit effects with their cursor. `caught_up` can advance a fully consumed empty
+batch; filtered revision gaps are normal. The CLI rebuilds an expired cursor
+from message pages and open-item entries/advisories before resuming.
+
+On batch `503 storage_unavailable`, one-shot `read` exits 1 with a diagnostic
+on stderr and keeps the checkpoint at its last completed output. `listen`
+retries from that position across transient 503, id-less `closing` events for
+`storage_unavailable` and incomplete frames; none of those advances the cursor.
+
+A batch `500 internal_error` or id-less `closing internal_error` instead stops
+the feed with exit 1. `listen` and `focus --follow` print a pause diagnostic
+on stderr with the operation, token and Request-Id. Stdout retains only complete
+feed records; the error adds no cursor. SSE Request-Id comes from the
+stream-opening response header, with no cursor or event fallback. Keep the last
+consumer-committed cursor and do not restart automatically. An explicit new raw
+invocation resumes from that cursor.
+
+For Tightbeam-managed feeds, a “Live updates paused” notice requires explicit
+resume through the registered handle:
+
+```sh
+tightbeam harklight-retry --session "$HARKLIGHT_HANDLE"
+```
+
+The pause survives Gateway restart and follower reconciliation. Resume uses
+Tightbeam's last durable checkpoint or rebuilds the baseline if none exists.
+An incomplete snapshot remains provisional. If the internal error returns,
+the feed pauses again; transient 503 recovery remains automatic.
+
+Advisories retain their subtype payload; not every advisory has text. Use
+`advisory-ack --item-id ID --advisory-id ID` for acknowledgment. Session end
+changes availability without closing conversations. For focus and show, use
+the existing grants; a show takes at most one device name or device ID. Do not
+change grants or enrollment to make a command succeed.
+
+Read the exact operation's success body: message writes return the message,
+reply returns an entry, result returns both, and correlated revise/retract can
+also return the acted entry. Use the installed Agent help for the remaining
+file, focus, show and session commands.

@@ -8,6 +8,43 @@ section for reaching the operator through Harklight.
 The pack works with local or hosted Harklight. Harklight connection settings
 stay in each organization's own Tightbeam configuration.
 
+## Protocol compatibility
+
+The source on this branch targets protocol 0.2 with Harklight Server, Agent,
+app and web 0.2.x and the paired Tightbeam Harklight integration. It is not
+compatible with protocol 0.1. Published v0.1.3 remains the old-protocol release;
+the source migration does not change that release or authorize a live update.
+
+The source targets are Agent
+[`5771877`](https://github.com/clickety-clacks/harklight-agent/commit/5771877daa1c3073c71ec7958802742a26ec90f5)
+and Tightbeam [PR #886](https://github.com/clickety-clacks/tightbeam/pull/886)
+at `5cba4761ddcd19204a4495afe423b4cf47a98a08`. The Agent has the same source tree
+as the command-contract build `95bf687`. Server field semantics follow
+[#256](https://github.com/clickety-clacks/harklight-server/pull/256),
+[#270](https://github.com/clickety-clacks/harklight-server/pull/270) and the
+round 26 projection-error behavior in
+[#289](https://github.com/clickety-clacks/harklight-server/pull/289).
+These are source references, not released deployment versions.
+
+Independent review of the pinned Tightbeam source is clean. Its isolated
+three-component run with Agent `5771877` and Server
+`1dc7ecbe0fa6e8239d9aef659116bc8e942ec164` passed real batch and SSE internal
+fault pause/resume, exact settlement after a committed revision whose response
+failed, and automatic recovery after a SQLite storage refusal. This is scoped
+integration evidence, not final release acceptance or live-install approval.
+
+Earlier component runs covered modern and migrated inline attachment bytes
+across Progress settlement, exact legacy-selector refusal, chat/answer wakes,
+post-dispatch receipts and feed restart. New revisions can issue new inline
+download IDs. The saved-receipt recovery after a worker stops before journaling
+has independent source review and isolated fixture tests; it was not one of the
+four real-Server fault cases above.
+
+Before the 0.2 pack release, complete the coordinated release checks, obtain
+the standing generated-content review, and name exact compatible versions in
+release notes. The protocol target includes Server, Agent, app and web 0.2.x;
+these component tests do not certify every application release combination.
+
 ## Apply or update
 
 Run this command on the organization's Tightbeam gateway host, where the
