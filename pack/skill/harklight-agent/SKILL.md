@@ -191,7 +191,8 @@ tightbeam harklight-settle --message "$HARKLIGHT_ITEM"
 A settled Progress update reports `settledCommand: "revise"` and the successful
 `revision`. For an item with no Tightbeam send or change record, settlement
 requires both `--message EXTERNAL_ITEM` and the Agent `--op-id OP`; it creates
-no wake or subscription. A standalone unknown operation ID is refused.
+no wake or subscription. A standalone operation ID must identify a saved send
+or paused handoff receipt; an unknown ID is refused.
 Do not substitute raw Agent retry for Tightbeam settlement: a raw success does
 not finish Tightbeam's item binding or wake effects.
 
@@ -213,8 +214,10 @@ harklight-agent retry --op-id "$HARKLIGHT_OP_ID" \
 
 Do not substitute an ID read from a replacement journal after a failure.
 
-Exit 0 confirms success; 1 is a local setup/journal/operation conflict; 2 is a
-definite Server refusal; 5 means unsupported; 7 means unresolved or retryable.
+Exit 0 confirms success; 1 is a local setup/journal/operation conflict or an
+internal fault on a read or feed; 2 is a definite Server refusal; 5 means
+unsupported; 7 means unresolved or retryable. An explicit `retryable: false`
+requires manual recovery rather than an automatic retry.
 Read the structured outcome and stderr reason, not just the exit code. A
 successful HTTP response that fails validation leaves the write unresolved
 under its original operation key. On a rejected or uncertain Server response,
@@ -225,6 +228,21 @@ a pending intent when its journal is unavailable or mismatched. Only an intact,
 matching journal's `operation_absent` establishes that it has no such intent;
 `operation_unresolved` does not. Abandoning local recovery cannot undo a Server
 write. Do not use a new send to discover whether an old send committed.
+
+A journaled write receiving `500 internal_error` exits 7 with one
+`outcome_unknown` stdout record. It retains the original `operation` and
+`op_id`, and carries `status: 500`, `error: "internal_error"`,
+`retryable: false` and `request_id` when available. It may already have committed.
+Keep its original journal, operation, payload and precondition. Record the
+operation, token and Request-Id, then use authoritative readback or explicitly
+settle that saved operation on user action. Do not start a retry loop or issue
+a replacement send. Tightbeam keeps the paused operation through restart;
+automatic recovery does not settle it.
+
+For HTTP failures, Request-Id comes from the response header, with error-body
+`request_id` as fallback; it is absent if both are unavailable. Each explicit
+retry reports the Request-Id of that attempt while retaining the original
+operation key.
 
 ## Read one of your own sent messages
 
@@ -291,6 +309,18 @@ These are alternative targets, not a sequence to run for one handoff. Preserve
 and effective `stage_outcome`. A handed outcome stays handed; a not-handed
 outcome may advance to handed. Delivery is nested in the entry or terminal,
 not a top-level message flag.
+
+A Tightbeam automatic handoff receipt can also pause on `internal_error`.
+The attributed handoff recipient can explicitly recover the saved receipt
+using its operation ID from the error log:
+
+```sh
+tightbeam harklight-settle --op-id "$HARKLIGHT_RECEIPT_OP_ID"
+```
+
+Tightbeam retries that receipt against its saved matching Agent journal.
+A new raw receipt operation does not settle the held operation. The raw receipt
+commands above are for standalone handoff, not this recovery path.
 
 Reply to a person chat in its existing conversation:
 
@@ -369,8 +399,28 @@ from message pages and open-item entries/advisories before resuming.
 
 On batch `503 storage_unavailable`, one-shot `read` exits 1 with a diagnostic
 on stderr and keeps the checkpoint at its last completed output. `listen`
-retries from that position across 503, id-less `closing` events and incomplete
-frames; none of those advances the cursor.
+retries from that position across transient 503, id-less `closing` events for
+`storage_unavailable` and incomplete frames; none of those advances the cursor.
+
+A batch `500 internal_error` or id-less `closing internal_error` instead stops
+the feed with exit 1. `listen` and `focus --follow` print a pause diagnostic
+on stderr with the operation, token and Request-Id. Stdout retains only complete
+feed records; the error adds no cursor. SSE Request-Id comes from the
+stream-opening response header, with no cursor or event fallback. Keep the last
+consumer-committed cursor and do not restart automatically. An explicit new raw
+invocation resumes from that cursor.
+
+For Tightbeam-managed feeds, a “Live updates paused” notice requires explicit
+resume through the registered handle:
+
+```sh
+tightbeam harklight-retry --session "$HARKLIGHT_HANDLE"
+```
+
+The pause survives Gateway restart and follower reconciliation. Resume uses
+Tightbeam's last durable checkpoint or rebuilds the baseline if none exists.
+An incomplete snapshot remains provisional. If the internal error returns,
+the feed pauses again; transient 503 recovery remains automatic.
 
 Advisories retain their subtype payload; not every advisory has text. Use
 `advisory-ack --item-id ID --advisory-id ID` for acknowledgment. Session end

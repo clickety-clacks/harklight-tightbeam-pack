@@ -16,7 +16,7 @@ compatible with protocol 0.1. Published v0.1.3 remains the old-protocol release;
 the source migration does not change that release or authorize a live update.
 
 The Agent command interface is pinned to source
-[80065e0](https://github.com/clickety-clacks/harklight-agent/commit/80065e05e6d0a34a970146ff011330cd76cbd431).
+[95bf687](https://github.com/clickety-clacks/harklight-agent/commit/95bf687597fcda41cdb0812a4041b99d777fe34d).
 Server field semantics come from [#256](https://github.com/clickety-clacks/harklight-server/pull/256)
 at `2ecf51f` and [#270](https://github.com/clickety-clacks/harklight-server/pull/270)
 at `3511371`, including the attachment-preservation ruling. These are integration
@@ -27,8 +27,11 @@ separately passed Progress preservation and exact legacy-selector checks against
 the same Server. That Server predates
 the final upload-discard patch, so those results do not establish discard acceptance.
 Tightbeam commands and wake fields follow [PR #886](https://github.com/clickety-clacks/tightbeam/pull/886)
-at `3fb890e570f090527ee90e27bfdf8043d13265a3`. Its isolated component-author
-pairing used Agent `80065e0` and Server `04e7b806`: modern and migrated inline
+at `08a39b2fc9a90aa8758ea74df93f2f1481d4a8bd` for round 26 pause, explicit
+resume and saved-receipt settlement. Independent integration review and paired
+verification of this delta remain pending. The Agent round 26 fault tests at
+`95bf687` used synthetic Server responses. The earlier isolated component-author
+pairing at Tightbeam `3fb890e` used Agent `80065e0` and Server `04e7b806`: modern and migrated inline
 attachment bytes survived Progress settlement after an ambiguous CLI result;
 legacy-selector refusal, chat/answer wakes, post-dispatch receipts and feed
 restart also passed. New revisions can issue new inline download IDs. This
