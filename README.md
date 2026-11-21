@@ -8,6 +8,22 @@ section for reaching the operator through Harklight.
 The pack works with local or hosted Harklight. Harklight connection settings
 stay in each organization's own Tightbeam configuration.
 
+## Protocol compatibility
+
+The source on this branch targets protocol 0.2 with Harklight Server, Agent,
+app and web 0.2.x and the paired Tightbeam Harklight integration. It is not
+compatible with protocol 0.1. Published v0.1.3 remains the old-protocol release;
+the source migration does not change that release or authorize a live update.
+
+The Agent command interface is pinned to source
+[b8464e58](https://github.com/clickety-clacks/harklight-agent/commit/b8464e58fa5ac1ff6f9b0ae590732f6b7c21e16e).
+Server field semantics come from [#256](https://github.com/clickety-clacks/harklight-server/pull/256)
+at `2ecf51f` and [#270](https://github.com/clickety-clacks/harklight-server/pull/270)
+at `3511371`, including the attachment-preservation ruling. These are integration
+development references, not evidence of a released or paired-tested deployment.
+Before the 0.2 pack release, confirm the Tightbeam interface and paired acceptance,
+review the generated content, and name exact compatible versions in release notes.
+
 ## Apply or update
 
 Run this command on the organization's Tightbeam gateway host, where the

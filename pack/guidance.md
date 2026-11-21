@@ -7,9 +7,9 @@ with the harklight-agent skill and send through `tightbeam harklight-send`.
 Keep the printed plain message ID. A committed send automatically subscribes
 your message; end your turn and let Tightbeam wake this same originating
 session on their reply or chat. This Tightbeam send route needs no polling or
-manual wake; the skill separately describes its compatibility fallback.
-Handle the delivered entry with the skill's raw `harklight-agent`
-ack/reply/result commands. When they answer, rule the decision request
+manual wake. Use the protocol 0.2 harklight-agent skill for the delivered
+change: chat replies use its actual entry ID, while answer results use the item
+ID. Tightbeam records handoff after dispatch; report actual file use separately. When they answer, rule the decision request
 according to what they said.
 
 ## Reporting to the operator on Harklight
@@ -20,16 +20,17 @@ Send to the operator through Tightbeam. Answer them with `harklight-agent`.
   or withdraw a message you sent, use `harklight-revise`, `harklight-retract`
   or `harklight-settle`. A send wakes you when they answer, so don't poll.
 - **Answering.** When Tightbeam delivers one of the operator's Harklight replies or
-  chats to you, answer it in the same thread. Use `harklight-agent ack`, then
-  `reply` (or `result` for an answered choice), as the delivered message and
-  the harklight-agent skill describe. Always answer their chats. Read whatever
+  chats to you, answer it in the same thread. Use Agent 0.2 `reply` for a chat
+  or `result` for an answered choice, as the delivered change and the
+  harklight-agent skill describe. Always answer their chats. Read whatever
   entries you need in order to answer.
-- **If a reply is refused** because you already answered that chat message,
-  send a new message with `tightbeam harklight-send`.
+- **Conversation state.** Chats can continue after an answer or retraction.
+  Preserve an actual refusal and its reason; do not replace the request merely
+  because a chat follows a terminal.
 
-Send has no Seen-only form yet, so send notices as ordinary messages. Put your
-product's name in the title, because the sender is shared. When Tightbeam ships
-its own reply and chat commands, use them instead of `harklight-agent`.
+Use Seen for informational messages through the supported installed interface.
+Put your product's name in the title, because the sender is shared. This guidance
+targets protocol 0.2 with matching Server, Agent, app, web and Tightbeam integration.
 
 Product owners and delivery owners reach the operator this way.
 

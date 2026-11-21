@@ -55,9 +55,9 @@ EXPECTED_SKILL_HEADINGS = [
     "## Automatic lifecycle for your own messages",
     "## Configuration and sending",
     "## Revise, retract or supersede",
-    "## Read results and settle an uncertain send",
+    "## Read results and settle an uncertain write",
     "## Read one of your own sent messages",
-    "## Handle a delivered entry",
+    "## Handle a delivered change",
     "## Raw command recovery and references",
 ]
 
