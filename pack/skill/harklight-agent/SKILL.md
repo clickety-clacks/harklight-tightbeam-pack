@@ -12,6 +12,13 @@ with the matching Tightbeam Harklight integration. It does not support protocol
 0.1. Use the organization's configured enrollment and the installed help for
 its execution context.
 
+The raw Agent commands below are pinned to the published 0.2 command contract.
+The Tightbeam-facing argv, response casing, send bindings and wake/settle
+behavior describe the paired integration design and remain proposed until its
+implemented consumer is read back. They are not evidence that an installed
+Tightbeam already supports them. Use the verified Agent interface for source
+integration work; confirm the Tightbeam interface before publishing this pack.
+
 ## Automatic lifecycle for your own messages
 
 Send through `tightbeam harklight-send` from your authenticated Tightbeam
@@ -76,6 +83,12 @@ Revise an existing item with its actual current content revision:
 tightbeam harklight-revise --message "$HARKLIGHT_ITEM" \
   --base-revision "$HARKLIGHT_REVISION" --title "Product: updated request" \
   --body "The revised details."
+```
+
+To withdraw an obsolete request, use retraction. It withdraws the item and ends
+its future wakes; it is a separate action from revision:
+
+```sh
 tightbeam harklight-retract --message "$HARKLIGHT_ITEM"
 ```
 
@@ -134,11 +147,23 @@ send without a server item ID must remain associated with its operation ID.
 Do not substitute raw Agent retry for Tightbeam settlement: a raw success does
 not finish Tightbeam's item binding or wake effects.
 
-For a raw Agent operation, retry the same journaled operation:
+Before the raw write, read and retain its journal identity from the same
+execution context:
 
 ```sh
-harklight-agent retry --op-id "$HARKLIGHT_OP_ID"
+harklight-agent journal-id
 ```
+
+Retain the returned `journal_id` alongside the operation ID. To recover that
+raw operation, qualify retry with the original journal ID, particularly when
+an absence result would affect your next action:
+
+```sh
+harklight-agent retry --op-id "$HARKLIGHT_OP_ID" \
+  --journal-id "$HARKLIGHT_JOURNAL_ID"
+```
+
+Do not substitute an ID read from a replacement journal after a failure.
 
 Exit 0 confirms success; 1 is a local setup/journal/operation conflict; 2 is a
 definite Server refusal; 5 means unsupported; 7 means unresolved or retryable.
@@ -179,17 +204,21 @@ occurrence even when a later message revision includes it.
 The Server records delivery when serving a chat entry or terminal answer.
 Tightbeam records handed after its durable prompt-dispatched boundary. Read
 that outcome; a receipt does not prove the requested action happened. For an
-authorized standalone handoff or recovery, raw Agent receipt distinguishes chat
-and answer targets:
+authorized standalone handoff or recovery, choose the receipt for the actual delivered
+change. For a person chat entry:
 
 ```sh
 harklight-agent receipt --item-id "$HARKLIGHT_ITEM" --entry-id "$HARKLIGHT_ENTRY"
+```
+
+For an answer, which has no conversation entry ID, use the item receipt instead:
+
+```sh
 harklight-agent receipt --item-id "$HARKLIGHT_ITEM"
 ```
 
-The first targets the person chat entry; the second targets the answer. Preserve
-`--agent` and `--rerouted` attribution where applicable. `--not-handed` needs a
-reason. Read `response.status` (`recorded`, `already_recorded`, `superseded`)
+These are alternative targets, not a sequence to run for one handoff. Preserve
+`--agent` and `--rerouted` attribution where applicable. `--not-handed REASON` supplies the required reason for failed handoff. Read `response.status` (`recorded`, `already_recorded`, `superseded`)
 and effective `stage_outcome`. A handed outcome stays handed; a not-handed
 outcome may advance to handed. Delivery is nested in the entry or terminal,
 not a top-level message flag.
@@ -226,9 +255,18 @@ Report each file's actual transfer and use independently of handoff:
 
 ```sh
 harklight-agent file-get --file-id "$HARKLIGHT_FILE" --output "$HARKLIGHT_PATH"
+```
+
+After the download succeeds, report the transfer:
+
+```sh
 harklight-agent file-use --item-id "$HARKLIGHT_ITEM" \
   --entry-id "$HARKLIGHT_ENTRY" --file-id "$HARKLIGHT_FILE" --transferred
-# After actually using that file:
+```
+
+After actually using that file, report use separately:
+
+```sh
 harklight-agent file-use --item-id "$HARKLIGHT_ITEM" \
   --entry-id "$HARKLIGHT_ENTRY" --file-id "$HARKLIGHT_FILE" --used
 ```

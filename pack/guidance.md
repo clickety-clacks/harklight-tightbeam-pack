@@ -1,3 +1,6 @@
+> Protocol 0.2 source proposal: Tightbeam send, wake and handoff behavior below
+> awaits verification against the implemented paired integration before publication.
+
 ## Decisions the operator must handle in person
 
 Some decision requests addressed to the operator need them in person: they have to log in,
