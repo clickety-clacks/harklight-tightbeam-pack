@@ -43,3 +43,17 @@ jobs:
         run: >-
           python3 tools/privacy_check.py --ci
           --root "${HARKLIGHT_PACK_CANDIDATE_ROOT:-.}"
+
+  tests:
+    if: >-
+      github.event_name != 'pull_request_target' &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests -v
