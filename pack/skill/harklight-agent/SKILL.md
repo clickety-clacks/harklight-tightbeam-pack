@@ -288,7 +288,9 @@ harklight-agent listen --session "$HARKLIGHT_HANDLE" --after "$HARKLIGHT_REV" --
 ```
 
 Durable change kinds are `message`, `entry` and `advisory`. Focus is ephemeral.
-Multiple readers can use one scope. A caller that commits effects independently
+Multiple readers can use one scope. The default reader saves its checkpoint
+after writing the corresponding output; a restart can repeat output. This is
+not a checkpoint for a consumer's later effects. A caller that commits effects independently
 uses its own `--after` checkpoint or `--snapshot`, regardless of another reader's
 cursor. A baseline is provisional until `baseline_complete`; discard an
 interrupted baseline and restart from the old committed cursor or a new snapshot.
