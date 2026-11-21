@@ -1,5 +1,6 @@
-> Protocol 0.2 source proposal: Tightbeam send, wake and handoff behavior below
-> awaits verification against the implemented paired integration before publication.
+> Protocol 0.2 source: use the matching Tightbeam integration, Agent and Server
+> versions pinned in the repository README. Source verification does not update
+> an existing installation.
 
 ## Decisions the operator must handle in person
 

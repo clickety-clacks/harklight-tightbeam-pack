@@ -12,12 +12,10 @@ with the matching Tightbeam Harklight integration. It does not support protocol
 0.1. Use the organization's configured enrollment and the installed help for
 its execution context.
 
-The raw Agent commands below are pinned to the published 0.2 command contract.
-The Tightbeam-facing argv, response casing, send bindings and wake/settle
-behavior describe the paired integration design and remain proposed until its
-implemented consumer is read back. They are not evidence that an installed
-Tightbeam already supports them. Use the verified Agent interface for source
-integration work; confirm the Tightbeam interface before publishing this pack.
+The commands below target the source revisions linked in the repository README.
+Tightbeam's protocol 0.2 integration must be installed with the matching Agent
+and Server before using them. Source verification does not establish that an
+existing installation supports these commands.
 
 ## Automatic lifecycle for your own messages
 
@@ -54,22 +52,37 @@ Send a question through Tightbeam:
 
 ```sh
 tightbeam harklight-send --session new --sender-id "$HARKLIGHT_SENDER" \
-  --title "Product: choose the next step" \
+  --type request --title "Product: choose the next step" \
   --body "Select an option or write a note." \
-  --choices-json '["Proceed", "Defer"]'
+  --choices-json '["Proceed", "Defer"]' --reply
 ```
 
 Use the sender already granted to the enrollment. Keep the returned
 `messageId`, `handle`, `senderId` and `opId` when present. The server issues the
 item ID; an uncertain send can lack it. Preserve the operation ID instead of
 inventing an item ID. Inspect the outcome and wake effect before claiming the
-message was sent.
+message was sent. Tightbeam output fields use camelCase; the nested `result`
+retains the Agent record's snake_case fields, such as `item_id` and
+`session_handle`.
 
-Choose structured choices for decisions, text for open questions and Seen for
-informational updates. Opening a message is not Seen or an answer. Put the
-product in the title when sharing a sender. Tightbeam's Progress send/update
-interface belongs to its paired integration; raw Agent flags are not automatically
-Tightbeam flags. Use only options exposed by that installed integration.
+Use `--type request` with `--choices-json` for decisions or `--reply` for an
+open question. Use `--type fyi` for a Seen-only informational update. Opening
+a message is not Seen or an answer. Put the product in the title when sharing
+a sender.
+
+Create a Progress item through Tightbeam:
+
+```sh
+tightbeam harklight-send --session new --sender-id "$HARKLIGHT_SENDER" \
+  --title "Product: work in progress" --progress 10 --progress-stage "Build"
+```
+
+Progress creation defaults to FYI. Update the same returned item:
+
+```sh
+tightbeam harklight-progress --message "$HARKLIGHT_ITEM" \
+  --percent 50 --stage "Verification"
+```
 
 Tightbeam's `--files-json` accepts file paths. Raw Agent reply uses `--file`
 for a path or `--file-id` for an upload handle. Preserve failed attachments
@@ -94,13 +107,19 @@ tightbeam harklight-retract --message "$HARKLIGHT_ITEM"
 
 Use the Tightbeam lifecycle commands for registered items so its wake effects
 remain associated with the operation. Raw Agent writes do not complete that
-association. Do not turn a refusal into an implicit replacement request.
+association. For an item without a Tightbeam send record, supply
+`--session "$HARKLIGHT_HANDLE"` to revise or retract. Either command can add
+`--in-reply-to "$HARKLIGHT_ENTRY"` for the current person chat; Tightbeam saves
+that correlation with the operation. Do not turn a refusal into an implicit
+replacement request.
 
 To replace requests, repeat `--supersedes` on a new Tightbeam send. Read every
 per-target result: only targets actually superseded get the corresponding wake
 effect. Targets belong to the same enrolled agent and sender; duplicates are
 considered once in input order. Warnings `invalid`, `unknown` and `closed`
-leave those targets unchanged. A different Tightbeam session can remain the
+leave those targets unchanged. Tightbeam exposes each target as a `supersedes`
+row with `messageId` and `effect`; a warning has `effect: "unchanged"` and
+`reason`. A different Tightbeam session can remain the
 registered recipient; do not infer ownership from the caller.
 
 For pre-cutover references, retain the original sender and old message ID. The
@@ -113,7 +132,9 @@ When Progress identifies a legacy selector from `--sender-id` or its local
 journal, an exact lookup miss returns `404 not_found` and exit 2 without
 retargeting. Multiple matching legacy senders require an explicit `--sender-id`.
 This mapping identifies only the parent item; old wake IDs and cursors do not
-map to protocol 0.2 chat entry IDs or terminal occurrences.
+map to protocol 0.2 chat entry IDs or terminal occurrences. The initial v2
+baseline is independent of historical wake rows; a retained event served again
+at cutover can produce a new wake. Reconcile earlier effects before acting.
 Raw Agent `--supersedes` takes item IDs; `--supersedes-local` explicitly resolves
 a local reference by sender. Keep Tightbeam's existing association without a
 second mapping or old transport fallback.
@@ -150,9 +171,24 @@ operation key, finalized payload, correlation entry, base revision and file
 semantics. A successful replay returns the stored success. A failed precondition
 is not authority to prepare a new write against newer content.
 
-Use `tightbeam harklight-settle` for an unresolved Tightbeam operation, selecting
-it with the identifiers supported by the installed integration. An uncertain
-send without a server item ID must remain associated with its operation ID.
+For an uncertain Tightbeam send without a server item ID, settle the saved
+operation by its returned `opId`:
+
+```sh
+tightbeam harklight-settle --op-id "$HARKLIGHT_OP_ID"
+```
+
+For a recorded unresolved revision, retraction or Progress update, select its
+saved operation by item:
+
+```sh
+tightbeam harklight-settle --message "$HARKLIGHT_ITEM"
+```
+
+A settled Progress update reports `settledCommand: "revise"` and the successful
+`revision`. For an item with no Tightbeam send or change record, settlement
+requires both `--message EXTERNAL_ITEM` and the Agent `--op-id OP`; it creates
+no wake or subscription. A standalone unknown operation ID is refused.
 Do not substitute raw Agent retry for Tightbeam settlement: a raw success does
 not finish Tightbeam's item binding or wake effects.
 
@@ -207,6 +243,19 @@ on attached content is the download ID; downloading by upload handle fails.
 Revise's same-item reuse is the specific exception described above.
 
 ## Handle a delivered change
+
+The source wake prompt starts with JSON; a notice batch may wrap it. These
+excerpts show the snake_case fields used for a chat and an answer:
+
+```jsonl
+{"kind":"entry","session_handle":"HANDLE","item_id":"ITEM","rev":12,"data":{"entry_id":"ENTRY","item_id":"ITEM","kind":"reply","author":"person","text":"Please continue"}}
+{"kind":"message","session_handle":"HANDLE","item_id":"ITEM","rev":13,"data":{"item_id":"ITEM","terminal":{"state":"answered","at_ms":1700000000000,"answer":null}}}
+```
+
+Use `item_id` and chat `data.entry_id` with the Agent. Local `event_id` and
+`feed_cursor` identify Tightbeam wake provenance; they are not Agent reply IDs
+or the Server feed revision. The full record also carries `request`,
+`request_revision` and normalized `entry`.
 
 Read the wake's actual item, handle, entry and revision identities. A chat
 change carries a real entry ID. An answer or close-out is a message change
