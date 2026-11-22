@@ -298,7 +298,7 @@ change. For a person chat entry:
 harklight-agent receipt --item-id "$HARKLIGHT_ITEM" --entry-id "$HARKLIGHT_ENTRY"
 ```
 
-For an answer, which has no conversation entry ID, use the item receipt instead:
+For a person answer, which has no conversation entry ID, use the item receipt instead:
 
 ```sh
 harklight-agent receipt --item-id "$HARKLIGHT_ITEM"
@@ -338,8 +338,8 @@ acted; further replies are legal. An uncorrelated reply is an ordinary agent
 turn. A reply may contain only files: omit `--body` and pass `--file PATH`.
 Conversation discussion is not itself new authority.
 
-For an answered terminal, reconcile earlier effects before acting and report
-the actual result:
+For a person-answered terminal, reconcile earlier effects before acting and
+report the actual result:
 
 ```sh
 harklight-agent result --item-id "$HARKLIGHT_ITEM" --status applied
@@ -349,9 +349,15 @@ Use `applied` only for an established effect, `refused` when it cannot be applie
 or `received` while unresolved. The reference derives from the operation; no
 explicit result reference or conversation entry ID is supplied. A sessionless
 answer remains visible but answer handoff/result returns `400 unsupported`.
-A session-bound item without an answer returns `409 not_answered`; a final or
-incompatible result returns `409 already_closed`. Cleared, expired or superseded
-outcomes stop work on that request and are not approval.
+On the Server #320 follow-up documented in the README, a session-bound item
+without an answer returns `409 not_answered` for both item receipt and result
+(CLI exit 2). After another registered Agent answers, both return
+`400 unsupported` (exit 5); the answer remains visible. Explicit replay preserves
+the saved refusal and its Request-Id and does not change the answer or revision.
+Keep that refusal; do not create a replacement operation to bypass it. A person
+answer, including No comment, permits both operations. A final or incompatible
+result returns `409 already_closed`. Cleared, expired or superseded outcomes
+stop work on that request and are not approval.
 
 Report each file's actual transfer and use independently of handoff:
 

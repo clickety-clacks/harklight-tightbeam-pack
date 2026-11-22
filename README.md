@@ -40,6 +40,16 @@ download IDs. The saved-receipt recovery after a worker stops before journaling
 has independent source review and isolated fixture tests; it was not one of the
 four real-Server fault cases above.
 
+The Server [#320](https://github.com/clickety-clacks/harklight-server/pull/320)
+follow-up was exercised separately on pre-candidate Server
+`d4d94b686a8e1c55c3ad2e22dba326d30ad21fcc` and CI-packaged Agent 0.2.0
+`85bcd191258b7e90230a80def88aa677fbc0397a`. All 20 targeted checks passed:
+item receipt and result return `409 not_answered` before an answer, and
+`400 unsupported` after a separately registered Agent answers. Replaying each
+refusal preserves its Request-Id. A distinct person answer permits both.
+These checks extend the receipt/result instructions below; they do not replace
+the earlier fault-test evidence or establish final candidate acceptance.
+
 Before the 0.2 pack release, complete the coordinated release checks, obtain
 the standing generated-content review, and name exact compatible versions in
 release notes. The protocol target includes Server, Agent, app and web 0.2.x;
