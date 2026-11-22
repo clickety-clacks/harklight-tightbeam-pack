@@ -33,8 +33,9 @@ Send to the operator through Tightbeam. Answer them with `harklight-agent`.
   `reply` (or `result` for an answered choice), as the delivered message and
   the harklight-agent skill describe. Always answer their chats. Read whatever
   entries you need in order to answer.
-- **If a reply is refused** because you already answered that chat message,
-  send a new message with `tightbeam harklight-send`.
+- **If a reply is refused** (an older Server may still close a chat after an
+  answer), send a new message with `tightbeam harklight-send`. A late chat
+  still gets an answer.
 
 Send has no Seen-only form yet, so send notices as ordinary messages. Put your
 product's name in the title, because the sender is shared. When Tightbeam ships

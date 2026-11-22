@@ -36,9 +36,11 @@ even for an uncertain or refused send; it does not by itself establish that the 
 was sent or subscribed. A failure before an ID was minted explains why no send
 happened. Never fabricate an ID.
 
-Revision and supersession are different operations. Do not alias supersede to
-revise or emulate missing Harklight behavior locally. If the required server
-or CLI operation is unavailable, report the gap to the Harklight owner.
+Revision and supersession are different operations: revise updates one message
+in place and keeps its subscription, supersede opens a new message and ends
+the old message's wakes. If the operation you need is unavailable, you may use
+the nearest one that works (for example revise in place of supersede), say
+plainly in the message that you did, and report the gap to the Harklight owner.
 
 Tightbeam owns this subscription and wake integration. Standalone Agent 0.1.5
 rejects its native Codex listen route; its one-shot `read` can retrieve entries
@@ -207,9 +209,11 @@ and unchanged inputs. It creates no new send or prepare. If it confirms commit,
 the original sender's subscription and any supersede effects are applied once.
 If it establishes refusal, the result says the message was not sent. If still
 unresolved, it says so, reports `wakeEffect: "none"`, and lifecycle actions on
-the ID remain refused. You may explicitly settle it again; do not put settle
-in a timer, poll or retry loop. You can also leave it for existing recovery at
-the next gateway start. Tightbeam does not otherwise retry it automatically.
+the ID remain refused. You may settle it again. Settling reruns the same
+recorded operation and creates no new send, so repeating it is safe: retry a
+few times with a growing delay, and if it is still unresolved, leave it for
+existing recovery at the next gateway start. Tightbeam does not otherwise retry
+it automatically.
 An already-settled or unknown ID is refused without a Harklight operation,
 with its settled outcome or the missing-record explanation. After settlement,
 ordinary lifecycle commands apply according to the established message state.
@@ -276,11 +280,14 @@ harklight-agent reply --session "$HARKLIGHT_SESSION" \
 ```
 
 Use a body that states the actual outcome. A conversation reply is not a
-terminal answer or a grant of new authority. Receiving discussion after a
-terminal does not prove that replying is still allowed: the recorded later
-discussion was delivered and acknowledged, but reply was refused because the
-request was closed. Preserve that refusal; do not reopen or send a replacement
-merely to answer it. For an `answered`
+terminal answer or a grant of new authority. The first answer settles a request
+and a second answer is refused, but the chat stays open after any terminal
+outcome (answered, No comment, expired, cleared, superseded or retracted): the
+person can keep writing, and you answer the chat the same way. You may reply
+more than once to the same event; each reply is its own operation, and a retry
+of one reply reuses its operation ID. If a reply is refused because the Server
+still treats the chat as closed, send a new message with
+`tightbeam harklight-send` so the person still gets an answer. For an `answered`
 terminal, reconcile earlier effects before applying its authorized outcome
 at most once, then report its disposition:
 
@@ -313,9 +320,10 @@ there is no Tightbeam reply verb.
 
 For a raw acknowledgment/reply/result operation that reports an uncertain
 outcome and an operation ID, recover that same operation
-with `harklight-agent retry --op-id "$HARKLIGHT_OP_ID"`. Do not apply an action
-bound to an older request revision. This raw recovery instruction does not
-apply to Tightbeam lifecycle commands and does not authorize automatic retries
-or a retry loop.
+with `harklight-agent retry --op-id "$HARKLIGHT_OP_ID"`. Retrying the same
+operation ID is idempotent, so you may repeat it with a growing delay while the
+outcome stays unknown. Do not apply an action bound to an older request
+revision. This raw recovery instruction does not apply to Tightbeam lifecycle
+commands.
 
 For raw commands outside Tightbeam, consult the installed Harklight Agent skill and its help. This skill covers Tightbeam-managed subscriptions and wakes.
