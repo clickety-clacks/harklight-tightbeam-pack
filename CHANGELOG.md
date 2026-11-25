@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.0
+
+The pack now uses Harklight protocol 0.2 only. It documents the current
+Tightbeam send and wake lifecycle, Progress, replies, and handoffs. It drops
+the old message selectors and the migrated enrollment-port workaround.
+Applying the pack updates Tightbeam guidance and skill elections. It leaves
+Harklight messages and attachments in their existing store.
+
+Compatibility: Harklight Server 0.2.x (current deployment: 0.2.19), Agent
+0.2.6 or later in the 0.2 series, and Web 0.2.5 or later in the 0.2 series
+when using the web client. Requires Tightbeam's protocol 0.2 Harklight
+integration. iOS release compatibility has not been verified.
+
 ## v0.1.3
 
 Apply now ignores unrelated archetype manifests and retries a failed download once. Manifests that apply edits still require a valid format and matching name.

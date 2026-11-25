@@ -7,10 +7,10 @@ description: Send authorized Harklight notices, decisions, or questions from Tig
 
 # Harklight for Tightbeam agents
 
-This skill targets protocol 0.2: Harklight Server, Agent, app and web 0.2.x,
-with the matching Tightbeam Harklight integration. It does not support protocol
-0.1. Use the organization's configured enrollment and the installed help for
-its execution context.
+This skill uses Harklight protocol 0.2 with the matching Tightbeam
+integration. See the pack README for supported component versions. Use the
+organization's configured enrollment and the installed help for its execution
+context.
 
 The commands below target the source revisions linked in the repository README.
 Tightbeam's protocol 0.2 integration must be installed with the matching Agent
@@ -43,10 +43,8 @@ Agent commands and the gateway need not share an identity directory, CA,
 endpoint or journal. Preserve an actual failure for the service owner; do not
 copy credentials or change live configuration to make an example work.
 
-Agent 0.2 uses the enrolled device endpoint. For a migrated identity whose saved
-port still points to enrollment, its configured device port can be selected
-with `--device-port` or `HARKLIGHT_DEVICE_PORT`. New enrollments store device
-and enrollment ports separately. Do not infer one port from another.
+Agent 0.2 uses the enrolled device endpoint. Device and enrollment ports are
+configured separately.
 
 Send a question through Tightbeam:
 
@@ -119,26 +117,10 @@ effect. Targets belong to the same enrolled agent and sender; duplicates are
 considered once in input order. Warnings `invalid`, `unknown` and `closed`
 leave those targets unchanged. Tightbeam exposes each target as a `supersedes`
 row with `messageId` and `effect`; a warning has `effect: "unchanged"` and
-`reason`. A missing legacy lookup yields local `effect: "unchanged"` with
-`reason: "unknown"`; the other targets proceed. A different Tightbeam session can remain the
-registered recipient; do not infer ownership from the caller.
-
-For pre-cutover references, retain the original sender and old message ID. The
-Agent CLI resolves that pair to the opaque server item ID through protocol 0.2.
-Progress and current or historical `message-get` verify a cached candidate
-against the Server's sender and `legacy_message_id`; a modern send UUID is not
-a legacy selector. That UUID remains a valid ordinary Progress `--request`
-alias without `--sender-id`.
-When Progress identifies a legacy selector from `--sender-id` or its local
-journal, an exact lookup miss returns `404 not_found` and exit 2 without
-retargeting. Multiple matching legacy senders require an explicit `--sender-id`.
-This mapping identifies only the parent item; old wake IDs and cursors do not
-map to protocol 0.2 chat entry IDs or terminal occurrences. The initial v2
-baseline is independent of historical wake rows; a retained event served again
-at cutover can produce a new wake. Reconcile earlier effects before acting.
-Raw Agent `--supersedes` takes item IDs; `--supersedes-local` explicitly resolves
-a local reference by sender. Keep Tightbeam's existing association without a
-second mapping or old transport fallback.
+`reason`. A different Tightbeam session can remain the registered recipient;
+check the registered recipient before acting. Use the server item ID for raw
+Agent `--supersedes`. A Tightbeam send UUID is a valid Progress `--request`
+alias.
 
 Raw Agent revision can optionally correlate to a person chat entry on the item
 at its current request revision. Success returns the message and acted entry;
@@ -256,8 +238,7 @@ The current read returns `{rev,message}`; a historical read returns
 `{rev,revision:{request_revision,message,files}}`. An unavailable historical
 revision returns `404 not_found`. Content revision, resource version, feed
 position and immutable entry position serve different purposes. A read does
-not mean Seen, handed or acted. To resolve a migrated reference, use
-`message-get --sender-id NAME --message-id OLD_ID`.
+not mean Seen, handed or acted.
 
 `FileCreated.file_id` is an upload handle for writes/discard. `FileRef.file_id`
 on attached content is the download ID; downloading by upload handle fails.
