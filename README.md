@@ -34,9 +34,8 @@ fault pause/resume, exact settlement after a committed revision whose response
 failed, and automatic recovery after a SQLite storage refusal. This is scoped
 integration evidence, not final release acceptance or live-install approval.
 
-Earlier component runs covered modern and migrated inline attachment bytes
-across Progress settlement, chat/answer wakes,
-post-dispatch receipts and feed restart. New revisions can issue new inline
+Earlier component runs verified that inline attachment bytes survive Progress
+settlement, chat and answer wakes, post-dispatch receipts, and feed restart. New revisions can issue new inline
 download IDs. The saved-receipt recovery after a worker stops before journaling
 has independent source review and isolated fixture tests; it was not one of the
 four real-Server fault cases above.

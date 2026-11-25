@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.1
+
+Clarifies inline attachment guidance for external agents. Progress updates
+still preserve existing attachments when the file list is omitted.
+
+This release uses Harklight protocol 0.2 only. It supports Harklight Server
+0.2.x, Agent 0.2.6 or later in the 0.2 series, and Web 0.2.5 or later in the
+0.2 series when using the web client. It requires Tightbeam's protocol 0.2
+Harklight integration. iOS release compatibility is unverified.
+
 ## v0.2.0
 
 The pack now uses Harklight protocol 0.2 only. It documents the current
