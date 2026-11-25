@@ -10,10 +10,11 @@ stay in each organization's own Tightbeam configuration.
 
 ## Protocol compatibility
 
-The source on this branch targets protocol 0.2 with Harklight Server, Agent,
-app and web 0.2.x and the paired Tightbeam Harklight integration. It is not
-compatible with protocol 0.1. Published v0.1.3 remains the old-protocol release;
-the source migration does not change that release or authorize a live update.
+Pack 0.2 uses Harklight protocol 0.2 only. Use Harklight Server 0.2.x
+(current deployment: 0.2.19), Agent 0.2.6 or later in the 0.2 series, and,
+if using the web client, Web 0.2.5 or later in the 0.2 series. Tightbeam
+requires its matching protocol 0.2 integration. iOS release compatibility
+has not been verified.
 
 The source targets are Agent
 [`5771877`](https://github.com/clickety-clacks/harklight-agent/commit/5771877daa1c3073c71ec7958802742a26ec90f5)
@@ -34,7 +35,7 @@ failed, and automatic recovery after a SQLite storage refusal. This is scoped
 integration evidence, not final release acceptance or live-install approval.
 
 Earlier component runs covered modern and migrated inline attachment bytes
-across Progress settlement, exact legacy-selector refusal, chat/answer wakes,
+across Progress settlement, chat/answer wakes,
 post-dispatch receipts and feed restart. New revisions can issue new inline
 download IDs. The saved-receipt recovery after a worker stops before journaling
 has independent source review and isolated fixture tests; it was not one of the
@@ -49,11 +50,6 @@ item receipt and result return `409 not_answered` before an answer, and
 refusal preserves its Request-Id. A distinct person answer permits both.
 These checks extend the receipt/result instructions below; they do not replace
 the earlier fault-test evidence or establish final candidate acceptance.
-
-Before the 0.2 pack release, complete the coordinated release checks, obtain
-the standing generated-content review, and name exact compatible versions in
-release notes. The protocol target includes Server, Agent, app and web 0.2.x;
-these component tests do not certify every application release combination.
 
 ## Apply or update
 
