@@ -136,8 +136,8 @@ harklight-agent progress --session "$HARKLIGHT_HANDLE" \
 
 Progress reads the content, revision and attachment metadata together. Its
 conditional PUT changes Progress while carrying the other message fields and
-omitting `file_ids`: the Server preserves the matched revision's attachments,
-including migrated inline files. Read the updated manifest for the new
+omitting `file_ids`. The Server preserves the matched revision's attachments,
+including inline files. Read the updated manifest for the new
 revision's download IDs; preserving attachment bytes does not imply that an
 inline file keeps the same download ID. Exact replay preserves both that omission and
 `If-Match`. Do not rebase a pending write onto a newer revision.
