@@ -111,9 +111,13 @@ identity-edit capabilities before attempting writes.
 
 Include a `### Breaking changes` section. The publication step detects removed
 or renamed installer actions, flags, literal output prefixes, and environment
-keys, plus removed verified Tightbeam versions. A release reviewer confirms
-that the section describes those changes and any semantic changes the
-detectors cannot see, such as changes to flag behavior or response meaning.
+keys, plus removed verified Tightbeam versions. An independent repository
+reviewer checks those signals and semantic changes such as flag behavior or
+response meaning. They approve the final release PR head in GitHub with
+`Breaking changes confirmed.` on its own line in the approval. Publication
+requires that approval and checks that the merged version and changelog
+match the reviewed files. If approval is missing, approve the exact release
+PR and rerun the failed release workflow.
 
 ## Privacy checks
 

@@ -86,6 +86,50 @@ def _validate_release_notes(
     return notes
 
 
+def _require_breaking_changes_review(target: str) -> None:
+    endpoint = "repos/{owner}/{repo}"
+    pulls = json.loads(_run(["gh", "api", f"{endpoint}/commits/{target}/pulls"]))
+    matching = [
+        pull for pull in pulls
+        if pull["merged_at"] and pull["merge_commit_sha"] == target
+        and pull["base"]["ref"] == "main"
+    ]
+    if len(matching) != 1:
+        raise RuntimeError("the release commit must come from one merged main pull request")
+    pull = matching[0]
+    head = pull["head"]["sha"]
+    number = pull["number"]
+    if not re.fullmatch(r"[0-9a-fA-F]{40,64}", head):
+        raise RuntimeError("the reviewed PR head is not a commit SHA")
+    _run(["git", "fetch", "--no-tags", "origin", head])
+    for path in ("VERSION", "CHANGELOG.md"):
+        reviewed = _run(["git", "rev-parse", f"{head}:{path}"])
+        released = _run(["git", "rev-parse", f"{target}:{path}"])
+        if reviewed != released:
+            raise RuntimeError("the released version and changelog must match the reviewed PR")
+
+    pages = json.loads(_run([
+        "gh", "api", "--paginate", "--slurp",
+        f"{endpoint}/pulls/{number}/reviews?per_page=100",
+    ]))
+    latest = {}
+    for review in sorted((review for page in pages for review in page), key=lambda row: row["id"]):
+        if review["state"] in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            latest[review["user"]["id"]] = review
+    if not any(
+        review["state"] == "APPROVED"
+        and review["commit_id"] == head
+        and review["user"]["id"] != pull["user"]["id"]
+        and review["author_association"] in {"OWNER", "MEMBER", "COLLABORATOR"}
+        and "Breaking changes confirmed." in (review.get("body") or "").splitlines()
+        for review in latest.values()
+    ):
+        raise RuntimeError(
+            "release requires an independent PR approval on its final head "
+            "containing the line 'Breaking changes confirmed.'"
+        )
+
+
 def _build_assets(version: str) -> tuple[Path, Path, Path]:
     pack_dir = ROOT / "pack"
     required = [
@@ -147,6 +191,7 @@ def main() -> int:
         )
         if not re.fullmatch(r"[0-9a-fA-F]{40,64}", target):
             raise RuntimeError("the release target is not a commit SHA")
+        _require_breaking_changes_review(target)
         verified = tested_versions(ROOT)
         signals = []
         if previous:

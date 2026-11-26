@@ -724,6 +724,7 @@ class ReleaseFetchTests(unittest.TestCase):
                 ),
                 patch.object(release_tool, "private_terms_from_environment", return_value=[]),
                 patch.object(release_tool, "scan_repository", return_value=[]),
+                patch.object(release_tool, "_require_breaking_changes_review"),
                 patch.object(release_tool, "tested_versions", return_value=("0.1.16", "0.1.17+5501")),
                 patch.object(release_tool, "breaking_signals", return_value=[]),
                 patch.object(release_tool, "_build_assets", return_value=tuple(assets)),
@@ -758,6 +759,41 @@ class ReleaseFetchTests(unittest.TestCase):
             ):
                 self.assertEqual(release_tool.main(), 0)
             build_assets.assert_not_called()
+
+    def test_release_requires_fresh_independent_breaking_changes_approval(self) -> None:
+        head = "b" * 40
+        pull = {
+            "number": 12, "merged_at": "present", "merge_commit_sha": "release",
+            "base": {"ref": "main"}, "head": {"sha": head}, "user": {"id": 1},
+        }
+        approval = {
+            "id": 1, "state": "APPROVED", "commit_id": head, "user": {"id": 2},
+            "author_association": "MEMBER", "body": "Breaking changes confirmed.",
+        }
+
+        def verify(reviews, released_blob="same"):
+            def fake_run(args):
+                if "/commits/" in args[-1]:
+                    return json.dumps([pull])
+                if "/reviews?" in args[-1]:
+                    return json.dumps([reviews])
+                return "same" if args[-1].startswith(head + ":") else released_blob
+
+            with patch.object(release_tool, "_run", side_effect=fake_run):
+                release_tool._require_breaking_changes_review("release")
+
+        verify([approval])
+        for reviews in (
+            [],
+            [{**approval, "commit_id": "stale"}],
+            [{**approval, "user": {"id": 1}}],
+            [{**approval, "body": "Approved."}],
+            [approval, {**approval, "id": 2, "state": "DISMISSED"}],
+        ):
+            with self.subTest(reviews=reviews), self.assertRaisesRegex(RuntimeError, "independent"):
+                verify(reviews)
+        with self.assertRaisesRegex(RuntimeError, "reviewed PR"):
+            verify([approval], released_blob="modified")
 
     def test_release_rejects_missing_or_incomplete_notes(self) -> None:
         compatibility = "Compatible with Tightbeam: None verified.\n"
