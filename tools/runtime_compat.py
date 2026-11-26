@@ -24,6 +24,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -45,6 +46,10 @@ ELECTION_MARKER = "# HARKLIGHT_PACK_ELECTED"
 GUIDANCE_BEGIN = "<!-- BEGIN HARKLIGHT FOR TIGHTBEAM v{version} -->"
 GUIDANCE_END = "<!-- END HARKLIGHT FOR TIGHTBEAM -->"
 PROCESS_NAME = "harklight-pack-runtime-compat"
+# The gateway refuses to boot without a runnable harness CLI. The official
+# Claude Code package satisfies that; no harness credential is configured, so
+# no agent session can start in the scratch organization.
+HARNESS_PACKAGE = "@anthropic-ai/claude-code"
 WINDOW = 2
 READY_TIMEOUT_SECONDS = 180
 COMMAND_TIMEOUT_SECONDS = 180
@@ -235,7 +240,29 @@ def _free_port() -> int:
         return probe.getsockname()[1]
 
 
-def _scratch_environment(scratch: Path, port: int, package_root: Path) -> dict[str, str]:
+def install_harness(directory: Path) -> Path:
+    """Install the official harness CLI package and return its bin directory."""
+    npm = shutil.which("npm")
+    if npm is None:
+        raise RuntimeCompatError("npm is needed to install the harness CLI the gateway requires")
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        result = subprocess.run(
+            [npm, "install", "--prefix", str(directory), "--no-audit", "--no-fund", HARNESS_PACKAGE],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeCompatError("the harness CLI install did not complete") from error
+    binary = directory / "node_modules" / ".bin" / "claude"
+    if result.returncode != 0 or not binary.exists():
+        raise RuntimeCompatError("the official harness CLI package could not be installed")
+    return binary.parent
+
+
+def _scratch_environment(scratch: Path, port: int, package_root: Path, harness_bin: Path) -> dict[str, str]:
     env = {
         key: value
         for key, value in os.environ.items()
@@ -251,7 +278,9 @@ def _scratch_environment(scratch: Path, port: int, package_root: Path) -> dict[s
             "TIGHTBEAM_PORT": str(port),
             "TIGHTBEAM_AS_PROCESS": PROCESS_NAME,
             "TIGHTBEAM_CLI": str(package_root / "bin" / "tightbeam"),
-            "PATH": str(package_root / "bin") + os.pathsep + env.get("PATH", ""),
+            "PATH": os.pathsep.join(
+                [str(package_root / "bin"), str(harness_bin), env.get("PATH", "")]
+            ),
         }
     )
     return env
@@ -368,14 +397,14 @@ def check_applied(identity: Path, root: Path) -> None:
             raise RuntimeCompatError(f"role {role} elects the pack skill but is not a pack role")
 
 
-def _check_release(release: Release, root: Path, work: Path) -> None:
+def _check_release(release: Release, root: Path, work: Path, harness_bin: Path) -> None:
     downloads = work / "download"
     downloads.mkdir()
     package = _download_package(release, downloads)
     package_root = _extract(package, work / "package")
     scratch = work / "org"
     scratch.mkdir()
-    env = _scratch_environment(scratch, _free_port(), package_root)
+    env = _scratch_environment(scratch, _free_port(), package_root, harness_bin)
     cli = env["TIGHTBEAM_CLI"]
 
     expected_version = release.tag.removeprefix("v").split("+", 1)[0]
@@ -434,15 +463,17 @@ def tested_versions(root: Path) -> tuple[str, ...]:
     _require_isolated_host()
     window = discover()
     passed = []
-    for release in window:
-        with tempfile.TemporaryDirectory(prefix="harklight-pack-runtime-") as temp:
-            try:
-                _check_release(release, root, Path(temp))
-            except RuntimeCompatError as error:
-                raise RuntimeCompatError(f"{release.tag}: {error}") from error
-            except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
-                raise RuntimeCompatError(f"{release.tag}: runtime check failed: {error}") from error
-        passed.append(release.tag)
+    with tempfile.TemporaryDirectory(prefix="harklight-pack-harness-") as harness:
+        harness_bin = install_harness(Path(harness))
+        for release in window:
+            with tempfile.TemporaryDirectory(prefix="harklight-pack-runtime-") as temp:
+                try:
+                    _check_release(release, root, Path(temp), harness_bin)
+                except RuntimeCompatError as error:
+                    raise RuntimeCompatError(f"{release.tag}: {error}") from error
+                except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+                    raise RuntimeCompatError(f"{release.tag}: runtime check failed: {error}") from error
+            passed.append(release.tag)
     if len(passed) != WINDOW:
         raise RuntimeCompatError("not every release in the support window passed")
     return tuple(sorted(passed))

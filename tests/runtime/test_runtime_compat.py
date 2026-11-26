@@ -121,6 +121,7 @@ class FailClosedTests(unittest.TestCase):
         with (
             patch.object(rc, "_require_isolated_host"),
             patch.object(rc, "discover", return_value=window),
+            patch.object(rc, "install_harness", return_value=ROOT),
             patch.object(rc, "_check_release") as check,
         ):
             self.assertEqual(rc.tested_versions(ROOT), ("v0.1.15+4082", "v0.1.16+4304"))
@@ -139,6 +140,7 @@ class FailClosedTests(unittest.TestCase):
             with (
                 patch.object(rc, "_require_isolated_host"),
                 patch.object(rc, "discover", return_value=window),
+                patch.object(rc, "install_harness", return_value=ROOT),
                 patch.object(rc, "_check_release", side_effect=check),
             ):
                 with self.assertRaisesRegex(rc.RuntimeCompatError, r"^v0\.1\.15\+4082: "):
