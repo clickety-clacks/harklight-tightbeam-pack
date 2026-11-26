@@ -54,14 +54,18 @@ if Path(sys.argv[0]).name == "tightbeam":
         assert payload == {
             "id": "message", "outcomes": [{"address": "user:reader", "status": "reached"}],
             "server_id": "example-server", "remote_conversation_id": "shared",
+            "remote_revision": 1,
         }
         record("reported")
         emit({"accepted": True, "duplicate": False})
+    elif command == "people-lookup":
+        assert payload == {"server_id": "example-server", "remote_conversation_id": "shared"}
+        emit({"conversation_id": "message", "revisions": [{"remote_revision": 1, "revision": 1}]})
     elif command == "people-event":
         assert log.read_text().splitlines()[-1] == "reported"
         assert payload == {
             "server_id": "example-server", "remote_conversation_id": "shared",
-            "event_id": "answer-a", "kind": "answer", "revision": 1,
+            "event_id": "answer-a", "kind": "answer", "remote_revision": 1,
             "speaker": {"address": "user:reader", "display_name": "Reader"},
             "content": {"answer": "yes"},
         }
@@ -99,7 +103,7 @@ else:
             record("sent")
             emit({
                 "kind": "committed", "op_id": op, "item_id": "shared",
-                "response": {"rev": 2, "message": {"shared": {"shared_id": "shared"}},
+                "response": {"rev": 2, "message": {"revision": 1, "shared": {"shared_id": "shared"}},
                              "recipients": [{"person_id": "person-a", "status": "reached"}]},
             })
     elif command == "read":

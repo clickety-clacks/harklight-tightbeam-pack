@@ -34,3 +34,9 @@ the Harklight groups interface is available. If the service is stopped,
 Tightbeam keeps waiting records for its next run. Harklight's pending
 baseline recovers chat and answers after a cursor expires. Historical Seen
 transitions may be unavailable after Server feed compaction.
+
+Back up and restore the relay database and Agent journal together. The
+database preserves the Agent session ID, which scopes the sender feed.
+Tightbeam can recover the binding and delivered revision for a known
+conversation within that scope. An unknown write still needs its original
+prepared request and journal to recover safely.

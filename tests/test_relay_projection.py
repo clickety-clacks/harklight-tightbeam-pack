@@ -37,7 +37,7 @@ class ProjectionTests(unittest.TestCase):
                 "remote_conversation_id": "shared_a",
                 "event_id": "answer_a",
                 "kind": "answer",
-                "revision": 2,
+                "remote_revision": 2,
                 "speaker": {"address": "user:reader", "display_name": "Dana"},
                 "content": {"answer": "thu"},
             },

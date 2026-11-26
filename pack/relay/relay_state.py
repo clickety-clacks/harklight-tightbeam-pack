@@ -44,6 +44,13 @@ class RelayState:
                     )
                 """)
                 self.db.execute("""
+                    CREATE TABLE IF NOT EXISTS receipts (
+                        event_key TEXT PRIMARY KEY,
+                        operation_id TEXT NOT NULL,
+                        event TEXT NOT NULL
+                    )
+                """)
+                self.db.execute("""
                     CREATE TABLE IF NOT EXISTS events (
                         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                         event TEXT NOT NULL
@@ -137,8 +144,17 @@ class RelayState:
         with self.db:
             self.db.execute("INSERT INTO events VALUES (1, ?)", (json.dumps(event),))
 
-    def complete_event(self, checkpoint) -> None:
+    def complete_event(self, checkpoint, receipt: dict | None = None) -> None:
         with self.db:
+            if receipt is not None:
+                event = receipt["event"]
+                key = json.dumps([event[field] for field in (
+                    "server_id", "remote_conversation_id", "kind", "event_id"
+                )])
+                self.db.execute(
+                    "INSERT OR IGNORE INTO receipts VALUES (?, ?, ?)",
+                    (key, receipt["receipt_id"], json.dumps(event)),
+                )
             self.db.execute("DELETE FROM events WHERE singleton = 1")
             self.db.execute("UPDATE feed SET checkpoint = ?", (json.dumps(checkpoint),))
 
@@ -169,3 +185,17 @@ class RelayState:
             )
             if self.binding(conversation_id) != binding:
                 raise ValueError("Tightbeam reported a different binding for this conversation")
+
+    def receipts(self) -> list[sqlite3.Row]:
+        return list(self.db.execute("SELECT * FROM receipts"))
+
+    def complete_receipt(self, event_key: str) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM receipts WHERE event_key = ?", (event_key,))
+
+    def binding_unreported(self, server_id: str, item_id: str) -> bool:
+        return self.db.execute(
+            """SELECT 1 FROM conversations c JOIN writes w ON c.record_id = w.record_id
+               WHERE c.server_id = ? AND c.item_id = ? AND w.reported = 0""",
+            (server_id, item_id),
+        ).fetchone() is not None

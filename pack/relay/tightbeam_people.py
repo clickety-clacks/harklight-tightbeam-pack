@@ -7,7 +7,7 @@ import subprocess
 
 
 class TightbeamPeople:
-    def call(self, command: str, payload: dict) -> dict:
+    def call(self, command: str, payload: dict) -> dict | None:
         result = subprocess.run(
             ["tightbeam", command, "--json", json.dumps(payload)],
             capture_output=True,
@@ -15,6 +15,14 @@ class TightbeamPeople:
             timeout=30,
         )
         if result.returncode:
+            if command == "people-lookup":
+                for output in (result.stdout, result.stderr):
+                    try:
+                        error = json.loads(output)
+                    except ValueError:
+                        continue
+                    if isinstance(error, dict) and error.get("code") == "not_found":
+                        return None
             raise RuntimeError(f"Tightbeam {command} exited {result.returncode}")
         return json.loads(result.stdout)
 
@@ -31,3 +39,8 @@ class TightbeamPeople:
         response = self.call(command, payload)
         if response.get("accepted") is not True or type(response.get("duplicate")) is not bool:
             raise RuntimeError(f"Tightbeam {command} did not confirm acceptance")
+
+    def lookup(self, server_id: str, item_id: str) -> dict | None:
+        return self.call("people-lookup", {
+            "server_id": server_id, "remote_conversation_id": item_id,
+        })

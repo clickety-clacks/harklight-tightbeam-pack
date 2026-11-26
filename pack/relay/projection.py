@@ -52,7 +52,7 @@ def event_for(server_id: str, change: dict, addresses: Addresses) -> dict | None
         "remote_conversation_id": data["item_id"],
         "event_id": event_id,
         "kind": kind,
-        "revision": revision,
+        "remote_revision": revision,
         "speaker": addresses.speaker(server_id, speaker),
         "content": content,
     }

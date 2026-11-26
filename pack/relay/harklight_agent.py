@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import tempfile
+import sys
 
 from agent_cli import AgentCLI
 
@@ -42,15 +43,21 @@ class HarklightAgent:
             if code in {"no_recipients", "decider_unreachable"} and "recipients" in result:
                 refusal["recipients"] = result["recipients"]
             return refusal
-        if kind != "send":
+        if kind not in {"send", "update"}:
             return {}
         response = result["response"]
+        revision = response["message"]["revision"]
+        if type(revision) is not int or revision < 1:
+            raise ValueError("Harklight returned an invalid request revision")
+        if kind == "update":
+            return {"remote_revision": revision}
         item_id = response["message"]["shared"]["shared_id"]
         if result["item_id"] != item_id:
             raise RuntimeError("Harklight returned inconsistent conversation IDs")
         return {
             "item_id": item_id,
             "server_id": self.server_id,
+            "remote_revision": revision,
             "recipients": response["recipients"],
         }
 
@@ -101,7 +108,7 @@ class HarklightAgent:
             args.extend(("--shared", "--entry-id", event["event_id"]))
         result = self.cli.mutation(self.journal, operation_id, args)
         if result["kind"] != "committed":
-            raise RuntimeError("Harklight refused to acknowledge the accepted event")
+            print("Harklight refused a receipt for an accepted event", file=sys.stderr)
 
     def changes(self, checkpoint: dict | None):
         if not self.shared:
