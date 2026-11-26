@@ -25,6 +25,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -333,6 +334,7 @@ def _wait_ready(gateway: subprocess.Popen, env: dict[str, str], scratch: Path, l
 
 
 def _stop(gateway: subprocess.Popen, env: dict[str, str], package_root: Path, scratch: Path) -> None:
+    """Stop the scratch gateway and everything it started."""
     if gateway.poll() is None:
         subprocess.run(
             [str(package_root / "bin" / "tightbeam-gateway"), "stop"],
@@ -345,8 +347,16 @@ def _stop(gateway: subprocess.Popen, env: dict[str, str], package_root: Path, sc
         try:
             gateway.wait(timeout=60)
         except subprocess.TimeoutExpired:
-            gateway.kill()
-            gateway.wait(timeout=30)
+            pass
+    # The gateway leads its own process group; take down any children it left.
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(gateway.pid, sig)
+        except ProcessLookupError:
+            break
+        time.sleep(2)
+    if gateway.poll() is None:
+        gateway.wait(timeout=30)
 
 
 # Pack checks
@@ -421,6 +431,7 @@ def _check_release(release: Release, root: Path, work: Path, harness_bin: Path) 
             stdin=subprocess.DEVNULL,
             stdout=log_file,
             stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
     try:
         _wait_ready(gateway, env, scratch, log)
@@ -463,10 +474,10 @@ def tested_versions(root: Path) -> tuple[str, ...]:
     _require_isolated_host()
     window = discover()
     passed = []
-    with tempfile.TemporaryDirectory(prefix="harklight-pack-harness-") as harness:
+    with tempfile.TemporaryDirectory(prefix="harklight-pack-harness-", ignore_cleanup_errors=True) as harness:
         harness_bin = install_harness(Path(harness))
         for release in window:
-            with tempfile.TemporaryDirectory(prefix="harklight-pack-runtime-") as temp:
+            with tempfile.TemporaryDirectory(prefix="harklight-pack-runtime-", ignore_cleanup_errors=True) as temp:
                 try:
                     _check_release(release, root, Path(temp), harness_bin)
                 except RuntimeCompatError as error:
