@@ -22,7 +22,12 @@ class TightbeamPeople:
         return self.call("people-collect", {"limit": 100})["records"]
 
     def report(self, report: dict) -> None:
-        self.call("people-report", report)
+        self.accept("people-report", report)
 
     def event(self, event: dict) -> None:
-        self.call("people-event", event)
+        self.accept("people-event", event)
+
+    def accept(self, command: str, payload: dict) -> None:
+        response = self.call(command, payload)
+        if response.get("accepted") is not True or type(response.get("duplicate")) is not bool:
+            raise RuntimeError(f"Tightbeam {command} did not confirm acceptance")

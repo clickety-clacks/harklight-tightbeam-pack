@@ -56,7 +56,7 @@ if Path(sys.argv[0]).name == "tightbeam":
             "server_id": "example-server", "remote_conversation_id": "shared",
         }
         record("reported")
-        emit({})
+        emit({"accepted": True, "duplicate": False})
     elif command == "people-event":
         assert log.read_text().splitlines()[-1] == "reported"
         assert payload == {
@@ -66,7 +66,7 @@ if Path(sys.argv[0]).name == "tightbeam":
             "content": {"answer": "yes"},
         }
         record("event")
-        emit({})
+        emit({"accepted": True, "duplicate": False})
     else:
         raise AssertionError(command)
 else:

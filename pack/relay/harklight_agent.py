@@ -26,8 +26,8 @@ class HarklightAgent:
 
     def write(self, operation_id: str, request: dict) -> dict:
         kind = request["kind"]
-        if kind == "send" and request["selector"]["kind"] == "group":
-            return self.refusal("unsupported", "Group selectors require the Harklight groups interface.")
+        if request.get("server_id", self.server_id) != self.server_id:
+            raise ValueError("conversation belongs to a different Harklight Server")
         with tempfile.TemporaryDirectory(prefix="people-relay-") as temporary:
             payload = Path(temporary) / "payload.json"
             if kind == "send":
@@ -38,9 +38,10 @@ class HarklightAgent:
 
         if result["kind"] == "refused":
             code = result.get("error") or "service_refused"
-            if code == "no_recipients" and "recipients" in result:
-                return {"recipients": result["recipients"]}
-            return self.refusal(code, f"Harklight refused the operation ({code}).")
+            refusal = self.refusal(code, f"Harklight refused the operation ({code}).")
+            if code in {"no_recipients", "decider_unreachable"} and "recipients" in result:
+                refusal["recipients"] = result["recipients"]
+            return refusal
         if kind != "send":
             return {}
         response = result["response"]

@@ -68,7 +68,8 @@ class Relay:
             return {**report, "refusal": request["refusal"]}
         kind = request["kind"]
         if kind == "send" and request["selector"] == {"kind": "people", "people": []}:
-            return {**report, "outcomes": request["missing"]}
+            return {**report, "outcomes": request["missing"],
+                    "refusal": {"code": "no_recipients", "message": "No recipients are mapped."}}
 
         operation_id = row["operation_id"]
         if kind == "close" and request["body"]:
@@ -79,15 +80,11 @@ class Relay:
 
         response = self.agent.write(operation_id, request)
         if "refusal" in response:
-            return {**report, "refusal": response["refusal"]}
-        if kind == "send":
-            report["outcomes"] = delivery_outcomes(request, response["recipients"])
-            if request["selector"]["kind"] == "group":
-                report["outcomes"] = [
-                    {"address": f'group:{request["selector"]["group"]}',
-                     "status": "reached" if response.get("item_id") else "not_reachable"}
-                ]
-            if response.get("item_id"):
+            report["refusal"] = response["refusal"]
+        if kind == "send" and "recipients" in response:
+            delivered = "item_id" in response
+            report["outcomes"] = delivery_outcomes(request, response["recipients"], delivered)
+            if delivered:
                 report.update(server_id=response["server_id"],
                               remote_conversation_id=response["item_id"])
         return report
@@ -100,6 +97,8 @@ class Relay:
         for result in self.state.unreported():
             self.report(result)
         for record in self.people.collect():
+            if record.get("remote_conversation_id"):
+                self.state.remember_binding(record)
             row = self.state.prepare(record["id"], lambda: self.prepare(record))
             result = (
                 self.deliver(row) if row["result"] is None else json.loads(row["result"])
@@ -114,7 +113,7 @@ class Relay:
             return
         event = pending["event"]
         self.people.event(event)
-        if event["kind"] in {"chat", "answer"}:
+        if pending["receipt_id"] is not None:
             self.agent.receipt(pending["receipt_id"], event)
         self.state.complete_event(pending["checkpoint"])
 
@@ -126,7 +125,10 @@ class Relay:
                 self.state.prepare_event({
                     "event": event,
                     "checkpoint": checkpoint,
-                    "receipt_id": str(uuid.uuid4()),
+                    "receipt_id": (
+                        str(uuid.uuid4()) if event["kind"] in {"chat", "answer"}
+                        and change.get("pending") is not False else None
+                    ),
                 })
                 self.accept_pending()
             else:

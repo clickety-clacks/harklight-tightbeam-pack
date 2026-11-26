@@ -158,3 +158,14 @@ class RelayState:
             pinned = self.db.execute("SELECT server_id FROM feed").fetchone()[0]
             if pinned != server_id:
                 raise ValueError("the enrolled Harklight Server changed")
+
+    def remember_binding(self, record: dict) -> None:
+        binding = {"server_id": record["server_id"], "item_id": record["remote_conversation_id"]}
+        conversation_id = record["conversation_id"]
+        with self.db:
+            self.db.execute(
+                "INSERT OR IGNORE INTO conversations VALUES (?, ?, ?)",
+                (conversation_id, binding["server_id"], binding["item_id"]),
+            )
+            if self.binding(conversation_id) != binding:
+                raise ValueError("Tightbeam reported a different binding for this conversation")

@@ -146,3 +146,29 @@ class RelayTests(unittest.TestCase):
             {"id": "conversation", "outcomes": [], "refusal": refusal}
         ])
         self.assertIsNone(relay.state.binding("conversation"))
+
+    def test_decider_unreachable_reports_atomic_failure_and_candidate_outcomes(self):
+        relay = self.relay({"reader": "person-1", "unmapped": "person-2"})
+        self.agent.write = lambda *_: {
+            "refusal": {"code": "decider_unreachable", "message": "Decider unreachable"},
+            "recipients": [
+                {"person_id": "person-1", "status": "unreachable"},
+                {"person_id": "person-2", "status": "reached"},
+            ],
+        }
+        relay.outbound()
+        result = self.people.reports[0]
+        self.assertEqual(result["refusal"]["code"], "decider_unreachable")
+        self.assertCountEqual(result["outcomes"], [
+            {"address": "user:reader", "status": "not_reachable"},
+            {"address": "user:unmapped", "status": "refused", "reason": "not_delivered"},
+        ])
+        self.assertIsNone(relay.state.binding("conversation"))
+
+    def test_group_and_user_together_refuses_the_whole_send(self):
+        relay = self.relay({"reader": "person-1"})
+        self.people.records = [{**SEND, "addresses": ["user:reader", "group:example"]}]
+        relay.outbound()
+        self.assertEqual(self.people.reports[0]["refusal"]["code"], "unsupported")
+        self.assertEqual(self.people.reports[0]["outcomes"], [])
+        self.assertEqual(self.agent.calls, [])
