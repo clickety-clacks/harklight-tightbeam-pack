@@ -12,15 +12,15 @@ Tightbeam CLI with the organization's active people-message relay permission.
 Make both CLIs available on the service's PATH.
 
 Extract the release so this directory is at
-`~/.local/share/harklight-tightbeam-pack/pack/relay`. Copy
-`config.example.json` to `~/.config/harklight-people-relay/config.json`.
+`$HOME/.local/share/harklight-tightbeam-pack/pack/relay`. Copy
+`config.example.json` to `$HOME/.config/harklight-people-relay/config.json`.
 Set `connection` to the Agent identity directory for the existing Harklight
 connection and `sender` to its authorized sender ID. Map each Tightbeam user
 ID to an opaque Harklight person ID in `users`. Each person may appear once.
 Display names and handles can change and do not act as addresses.
 
 For systemd user services, copy the two unit files to
-`~/.config/systemd/user/`, then run `systemctl --user daemon-reload` and
+`$HOME/.config/systemd/user/`, then run `systemctl --user daemon-reload` and
 `systemctl --user enable --now harklight-people-relay.timer`. The pack
 installer leaves this service disabled. The timer runs one relay instance
 at a time. Keep its state directory across service restarts and pack upgrades.
