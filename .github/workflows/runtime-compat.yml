@@ -1,0 +1,34 @@
+name: Tightbeam runtime compatibility
+
+on:
+  pull_request:
+  push:
+    paths:
+      - pack/**
+      - bin/harklight_pack.py
+      - tools/runtime_compat.py
+      - tests/runtime/**
+      - .github/workflows/runtime-compat.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run offline matrix checks
+        run: python3 tests/runtime/test_runtime_compat.py -v
+      - name: Apply the pack to the current and previous Tightbeam releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/runtime_compat.py
