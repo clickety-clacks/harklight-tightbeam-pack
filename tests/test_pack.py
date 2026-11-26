@@ -575,6 +575,10 @@ class ApplyTests(unittest.TestCase):
                 "#!/usr/bin/env python3\n"
                 "import os, pathlib, sys\n"
                 "args=sys.argv[1:]\n"
+                "if args == ['--help']:\n"
+                "    print('  identity edit <archetype> [--manifest | --skill <name>]')\n"
+                "    print('                [--file <path>]')\n"
+                "    sys.exit(0)\n"
                 "base=pathlib.Path(os.environ['TIGHTBEAM_BASE_DIR'])\n"
                 "identity=base/'identity'\n"
                 "role=args[2]\n"
@@ -705,6 +709,8 @@ class ReleaseFetchTests(unittest.TestCase):
 
             def fake_run(args: list[str]) -> str:
                 commands.append(args)
+                if args[:3] == ["gh", "release", "view"]:
+                    return json.dumps({"tagName": "v0.9.0", "body": "Previous notes."})
                 return "main" if args[:3] == ["git", "branch", "--show-current"] else ""
 
             with (
@@ -718,6 +724,8 @@ class ReleaseFetchTests(unittest.TestCase):
                 ),
                 patch.object(release_tool, "private_terms_from_environment", return_value=[]),
                 patch.object(release_tool, "scan_repository", return_value=[]),
+                patch.object(release_tool, "tested_versions", return_value=("0.1.16", "0.1.17+5501")),
+                patch.object(release_tool, "breaking_signals", return_value=[]),
                 patch.object(release_tool, "_build_assets", return_value=tuple(assets)),
                 patch.object(release_tool, "_run", side_effect=fake_run),
                 patch.dict(
@@ -755,17 +763,32 @@ class ReleaseFetchTests(unittest.TestCase):
         compatibility = "Compatible with Tightbeam: None verified.\n"
         breaking = "### Breaking changes\n\nNone.\n"
         cases = [
-            ("", "Compatible with Tightbeam"),
-            (breaking, "Compatible with Tightbeam"),
-            ("Compatible with Tightbeam: 0.1.x\n" + breaking, "Compatible with Tightbeam"),
+            ("", "executed runtime cases"),
+            (breaking, "executed runtime cases"),
+            ("Compatible with Tightbeam: 0.1.x\n" + breaking, "executed runtime cases"),
             (compatibility, "Breaking changes"),
             (compatibility + "### Breaking changes\n\n### Other\nText.\n", "Breaking changes"),
         ]
         for notes, error in cases:
             with self.subTest(notes=notes):
                 with self.assertRaisesRegex(RuntimeError, error):
-                    release_tool._validate_release_notes(notes)
-        release_tool._validate_release_notes(compatibility + breaking)
+                    release_tool._validate_release_notes(notes, (), [])
+        release_tool._validate_release_notes(compatibility + breaking, (), [])
+        self.assertEqual(
+            release_tool._validate_release_notes(
+                "Compatible with Tightbeam: From release tests.\n" + breaking,
+                ("0.1.15", "0.1.16"), [],
+            ),
+            "Compatible with Tightbeam: 0.1.15, 0.1.16\n" + breaking,
+        )
+        with self.assertRaisesRegex(RuntimeError, "executed runtime cases"):
+            release_tool._validate_release_notes(compatibility + breaking, ("0.1.16",), [])
+        with self.assertRaisesRegex(RuntimeError, "flag --source-dir"):
+            release_tool._validate_release_notes(compatibility + breaking, (), ["flag --source-dir"])
+        release_tool._validate_release_notes(
+            compatibility + "### Breaking changes\n\nRemoved --source-dir.\n",
+            (), ["flag --source-dir"],
+        )
 
     def test_update_download_checks_archive_checksum(self) -> None:
         archive_buffer = io.BytesIO()

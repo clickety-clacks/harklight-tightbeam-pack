@@ -101,11 +101,19 @@ release. A release workflow dispatch on main also publishes the current
 version. Setting release_policy to manual stops publication from a push. Both
 paths run the same privacy checks.
 
+The support window is the current full Tightbeam release and the preceding
+full release. Publication runs the pack against both exact published builds.
 Each version's changelog entry needs a `Compatible with Tightbeam:` line
-with comma-separated, exact Tightbeam versions tested with that pack. Use
-`Compatible with Tightbeam: None verified.` when no version has been verified.
-Include a `### Breaking changes` section with the changes or explicitly state
-that there are none. The publication step checks both before building assets.
+matching the two tested versions in lexicographic order. Use
+`Compatible with Tightbeam: From release tests.` to fill the line from CI.
+Fixture-only unit tests do not count. Outside this window, the installer checks the CLI's
+identity-edit capabilities before attempting writes.
+
+Include a `### Breaking changes` section. The publication step detects removed
+or renamed installer actions, flags, literal output prefixes, and environment
+keys, plus removed verified Tightbeam versions. A release reviewer confirms
+that the section describes those changes and any semantic changes the
+detectors cannot see, such as changes to flag behavior or response meaning.
 
 ## Privacy checks
 

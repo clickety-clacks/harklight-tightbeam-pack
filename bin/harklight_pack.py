@@ -394,6 +394,26 @@ def _apply(identity_root: Path, base_dir: Path, pack: Pack) -> None:
     env["TIGHTBEAM_BASE_DIR"] = str(base_dir)
     env.pop("TIGHTBEAM_URL", None)
     env.pop("TIGHTBEAM_TOKEN", None)
+
+    help_result = subprocess.run(
+        [tightbeam, "--help"],
+        cwd=base_dir,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    edit_help = re.search(
+        r"(?m)^\s*identity edit(?=\s)(.*(?:\n[ \t]+\[.*)*)",
+        help_result.stdout + "\n" + help_result.stderr,
+    )
+    if help_result.returncode or not edit_help or not all(
+        flag in edit_help.group(0) for flag in ("--manifest", "--skill", "--file")
+    ):
+        raise ApplyError(
+            "this Tightbeam CLI does not advertise the identity edit capabilities "
+            "required by the pack; no edits were attempted"
+        )
     with tempfile.TemporaryDirectory(prefix="harklight-pack-") as temp:
         temp_root = Path(temp)
         for index, (kind, path, content) in enumerate(changes):
