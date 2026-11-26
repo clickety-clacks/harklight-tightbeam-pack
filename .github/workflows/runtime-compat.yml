@@ -7,6 +7,10 @@ on:
       - pack/**
       - bin/harklight_pack.py
       - tools/runtime_compat.py
+      - tools/release.py
+      - tools/release_checks.py
+      - CHANGELOG.md
+      - VERSION
       - tests/runtime/**
       - .github/workflows/runtime-compat.yml
   workflow_dispatch:
@@ -23,12 +27,20 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Run offline matrix checks
         run: python3 tests/runtime/test_runtime_compat.py -v
       - name: Apply the pack to the current and previous Tightbeam releases
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 tools/runtime_compat.py
+        run: python3 tools/runtime_compat.py | tee "$RUNNER_TEMP/pack-runtime.json"
+      - name: Preview release notes and breaking-change signals
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/release.py --preview "$RUNNER_TEMP/pack-runtime.json"

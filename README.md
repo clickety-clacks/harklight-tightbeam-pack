@@ -114,7 +114,8 @@ identity-edit capabilities before attempting writes.
 
 Include a `### Breaking changes` section. The publication step detects removed
 or renamed installer actions, flags, literal output prefixes, and environment
-keys, plus removed verified Tightbeam versions. An independent repository
+keys, changes to the managed skill name and identity markers, and removed
+role elections or verified Tightbeam versions. An independent repository
 reviewer checks those signals and semantic changes such as flag behavior or
 response meaning. They approve the final release PR head in GitHub with
 `Breaking changes confirmed.` on its own line in the approval. Publication

@@ -82,9 +82,46 @@ def _validate_release_notes(
     ]
     if len(breaking) != 1 or not breaking[0]:
         raise RuntimeError("release notes require one nonempty Breaking changes section")
-    if signals and re.match(r"(?i)^(?:[-*]\s*)?(?:none\b|no\s+breaking\b)", breaking[0]):
-        raise RuntimeError("document detected breaking changes: " + ", ".join(signals))
+    if signals:
+        entries = [
+            line.strip(" \t-+*`.")
+            for line in breaking[0].splitlines()
+            if line.strip()
+        ]
+        placeholder = r"(?i)^(?:none\b|nothing\b|no\s+(?:breaking\b|changes\b)|n/?a\b|tbd\b)"
+        if not entries or any(not entry or re.match(placeholder, entry) for entry in entries):
+            raise RuntimeError("document detected breaking changes: " + ", ".join(signals))
     return notes
+
+
+def _checked_release_notes(current: str, verified: tuple[str, ...]) -> str:
+    verified = tuple(version.removeprefix("v") for version in verified)
+    if len(verified) != 2 or len(set(verified)) != 2:
+        raise RuntimeError("release requires two distinct verified Tightbeam versions")
+    published = json.loads(_run(["gh", "release", "view", "--json", "tagName,body"]))
+    tag = published["tagName"]
+    if not tag.startswith("v") or _version(tag[1:]) is None:
+        raise RuntimeError("the previous published pack tag is invalid")
+    if tag == f"v{current}":
+        raise RuntimeError("this pack version is already published")
+    signals = breaking_signals(ROOT, tag[1:], published["body"], verified)
+    if signals:
+        print("Breaking change signals: " + ", ".join(signals))
+    return _validate_release_notes(_release_notes(current), verified, signals)
+
+
+def _preview_release_notes(result_path: Path) -> int:
+    try:
+        current = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        if current == _previous_version():
+            print("no versioned pack release is required")
+            return 0
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        _checked_release_notes(current, tuple(result["compatible_with_tightbeam"]))
+        return 0
+    except (KeyError, OSError, ValueError, RuntimeError) as error:
+        print(f"release notes check refused: {error}", file=sys.stderr)
+        return 1
 
 
 def _require_breaking_changes_review(target: str) -> None:
@@ -172,7 +209,6 @@ def main() -> int:
         if parsed is None or current == previous:
             print("no versioned pack release is required")
             return 0
-        notes = _release_notes(current)
         terms = private_terms_from_environment()
         policy = json.loads((ROOT / "sync-policy.json").read_text(encoding="utf-8"))
         release_policy = policy.get("release_policy")
@@ -193,17 +229,7 @@ def main() -> int:
         if not re.fullmatch(r"[0-9a-fA-F]{40,64}", target):
             raise RuntimeError("the release target is not a commit SHA")
         _require_breaking_changes_review(target)
-        verified = tuple(version.removeprefix("v") for version in tested_versions(ROOT))
-        if len(verified) != 2 or len(set(verified)) != 2:
-            raise RuntimeError("release requires two distinct verified Tightbeam versions")
-        signals = []
-        if previous:
-            published = json.loads(_run(["gh", "release", "view", "--json", "tagName,body"]))
-            tag = published["tagName"]
-            if not tag.startswith("v") or _version(tag[1:]) is None:
-                raise RuntimeError("the previous published pack tag is invalid")
-            signals = breaking_signals(ROOT, tag[1:], published["body"], verified)
-        notes = _validate_release_notes(notes, verified, signals)
+        notes = _checked_release_notes(current, tested_versions(ROOT))
         if scan_repository(ROOT, terms, extra_texts={"release notes": notes}):
             raise RuntimeError("privacy check failed before release publication")
         archive, script, sums = _build_assets(current)
@@ -234,4 +260,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--preview":
+        raise SystemExit(_preview_release_notes(Path(sys.argv[2])))
     raise SystemExit(main())

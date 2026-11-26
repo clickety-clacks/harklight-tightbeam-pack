@@ -1,6 +1,7 @@
 """Check release claims against executed compatibility cases and the last tag."""
 
 import ast
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -11,8 +12,16 @@ VERSION_PATTERN = r"[0-9]+\.[0-9]+\.[0-9]+(?:\+[A-Za-z0-9.-]+)?"
 
 def installer_contract(source: str) -> set[str]:
     """Read literal installer actions, flags, environment keys and output prefixes."""
-    contract = set()
-    for node in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    identity_constants = {"SKILL_MARKER", "ELECTION_MARKER", "SKILL_NAME"}
+    contract = {
+        f"{target.id} {node.value.value}"
+        for node in tree.body if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+        for target in node.targets
+        if isinstance(target, ast.Name) and target.id in identity_constants
+    }
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         function = node.func
@@ -43,15 +52,22 @@ def installer_contract(source: str) -> set[str]:
 
 
 def breaking_signals(root: Path, previous: str, previous_notes: str, verified: tuple[str, ...]) -> list[str]:
-    path = "bin/harklight_pack.py"
-    baseline = subprocess.run(
-        ["git", "show", f"refs/tags/v{previous}:{path}"],
-        cwd=root, capture_output=True, text=True, check=False,
-    )
-    if baseline.returncode != 0:
-        raise RuntimeError("cannot read the previous published installer")
-    current = (root / path).read_text(encoding="utf-8")
-    removed = installer_contract(baseline.stdout) - installer_contract(current)
+    def previous_file(path: str) -> str:
+        baseline = subprocess.run(
+            ["git", "show", f"refs/tags/v{previous}:{path}"],
+            cwd=root, capture_output=True, text=True, check=False,
+        )
+        if baseline.returncode != 0:
+            raise RuntimeError(f"cannot read {path} from the previous published pack")
+        return baseline.stdout
+
+    installer = "bin/harklight_pack.py"
+    current = (root / installer).read_text(encoding="utf-8")
+    removed = installer_contract(previous_file(installer)) - installer_contract(current)
+    elections = "pack/elections.json"
+    old_roles = set(json.loads(previous_file(elections))["roles"])
+    new_roles = set(json.loads((root / elections).read_text(encoding="utf-8"))["roles"])
+    removed.update(f"pack election for {role}" for role in old_roles - new_roles)
     prior = re.search(r"^Compatible with Tightbeam: (.*)$", previous_notes, re.M)
     if prior:
         removed.update(

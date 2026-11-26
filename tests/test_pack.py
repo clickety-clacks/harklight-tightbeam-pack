@@ -819,8 +819,14 @@ class ReleaseFetchTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "executed runtime cases"):
             release_tool._validate_release_notes(compatibility + breaking, ("0.1.16",), [])
-        with self.assertRaisesRegex(RuntimeError, "flag --source-dir"):
-            release_tool._validate_release_notes(compatibility + breaking, (), ["flag --source-dir"])
+        for placeholder in ("None.", "Nothing.", "N/A", "- **None.**", "TBD"):
+            with self.subTest(placeholder=placeholder), self.assertRaisesRegex(
+                RuntimeError, "flag --source-dir"
+            ):
+                release_tool._validate_release_notes(
+                    compatibility + "### Breaking changes\n\n" + placeholder,
+                    (), ["flag --source-dir"],
+                )
         release_tool._validate_release_notes(
             compatibility + "### Breaking changes\n\nRemoved --source-dir.\n",
             (), ["flag --source-dir"],
