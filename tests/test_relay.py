@@ -239,3 +239,14 @@ class RelayTests(unittest.TestCase):
         relay.inbound()
         self.assertEqual(self.people.events[0]["remote_revision"], 1)
         self.assertEqual(relay.state.checkpoint(), {"rev": 20})
+
+    def test_unresolved_send_holds_events_for_yet_unbound_conversation(self):
+        relay = self.relay({"reader": "person-1"})
+        self.agent.failure = RuntimeError("no send response")
+        with self.assertRaisesRegex(RuntimeError, "no send response"):
+            relay.outbound()
+        self.people.lookup = lambda *_: None
+        with self.assertRaisesRegex(RuntimeError, "waiting"):
+            relay.inbound()
+        self.assertEqual(self.people.events, [])
+        self.assertIsNone(relay.state.checkpoint())

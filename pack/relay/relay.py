@@ -170,7 +170,9 @@ class Relay:
                 except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                     held.add(item_id)
                     continue
-                if binding is None and self.state.owns(server_id, item_id):
+                if binding is None and (
+                    self.state.owns(server_id, item_id) or self.state.has_unresolved_send()
+                ):
                     held.add(item_id)
                     continue
                 if binding is not None and not any(

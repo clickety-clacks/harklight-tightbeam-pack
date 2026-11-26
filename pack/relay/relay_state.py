@@ -199,3 +199,8 @@ class RelayState:
                WHERE c.server_id = ? AND c.item_id = ? AND w.reported = 0""",
             (server_id, item_id),
         ).fetchone() is not None
+
+    def has_unresolved_send(self) -> bool:
+        return self.db.execute(
+            "SELECT 1 FROM writes WHERE result IS NULL AND json_extract(request, '$.kind') = 'send' LIMIT 1"
+        ).fetchone() is not None

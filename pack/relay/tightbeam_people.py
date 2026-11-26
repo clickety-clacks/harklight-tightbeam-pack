@@ -16,12 +16,14 @@ class TightbeamPeople:
         )
         if result.returncode:
             if command == "people-lookup":
-                for output in (result.stdout, result.stderr):
+                for line in result.stderr.splitlines():
                     try:
-                        error = json.loads(output)
+                        response = json.loads(line)
                     except ValueError:
                         continue
-                    if isinstance(error, dict) and error.get("code") == "not_found":
+                    if (isinstance(response, dict) and response.get("httpStatus") == 404
+                            and isinstance(response.get("error"), dict)
+                            and response["error"].get("code") == "not_found"):
                         return None
             raise RuntimeError(f"Tightbeam {command} exited {result.returncode}")
         return json.loads(result.stdout)
