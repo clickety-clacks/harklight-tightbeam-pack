@@ -13,7 +13,10 @@ VERSION_PATTERN = r"[0-9]+\.[0-9]+\.[0-9]+(?:\+[A-Za-z0-9.-]+)?"
 def installer_contract(source: str) -> set[str]:
     """Read literal installer actions, flags, environment keys and output prefixes."""
     tree = ast.parse(source)
-    identity_constants = {"SKILL_MARKER", "ELECTION_MARKER", "SKILL_NAME"}
+    identity_constants = {
+        "SKILL_MARKER", "ELECTION_MARKER", "SKILL_NAME",
+        "GUIDANCE_BEGIN_PREFIX", "GUIDANCE_END",
+    }
     contract = {
         f"{target.id} {node.value.value}"
         for node in tree.body if isinstance(node, ast.Assign)

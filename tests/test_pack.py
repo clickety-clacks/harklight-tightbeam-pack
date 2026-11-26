@@ -5,6 +5,7 @@ import io
 import json
 import os
 import sys
+from subprocess import CompletedProcess
 import tarfile
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ sys.path.insert(0, str(ROOT / "bin"))
 import harklight_pack
 import privacy_check
 import release as release_tool
+import release_checks
 import sync_from_installation
 
 
@@ -794,6 +796,40 @@ class ReleaseFetchTests(unittest.TestCase):
                 verify(reviews)
         with self.assertRaisesRegex(RuntimeError, "reviewed PR"):
             verify([approval], released_blob="modified")
+
+    def test_release_detects_removed_pack_contract(self) -> None:
+        previous_installer = (
+            'SKILL_NAME = "harklight-agent"\n'
+            'SKILL_MARKER = "managed"\n'
+            'ELECTION_MARKER = "elected"\n'
+            'GUIDANCE_BEGIN_PREFIX = "begin"\n'
+            'GUIDANCE_END = "end"\n'
+            'parser.add_argument("--source-dir")\n'
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "bin").mkdir()
+            (root / "pack").mkdir()
+            (root / "bin/harklight_pack.py").write_text("", encoding="utf-8")
+            (root / "pack/elections.json").write_text('{"roles": ["coder"]}', encoding="utf-8")
+
+            def read_previous(args, **kwargs):
+                content = (
+                    previous_installer
+                    if args[-1].endswith(":bin/harklight_pack.py")
+                    else '{"roles": ["coder", "reviewer"]}'
+                )
+                return CompletedProcess(args, 0, content)
+
+            with patch.object(release_checks.subprocess, "run", side_effect=read_previous):
+                signals = release_checks.breaking_signals(
+                    root, "0.2.1", "Compatible with Tightbeam: 0.1.15, 0.1.16", ("0.1.16",)
+                )
+        self.assertCountEqual(signals, [
+            "SKILL_NAME harklight-agent", "SKILL_MARKER managed", "ELECTION_MARKER elected",
+            "GUIDANCE_BEGIN_PREFIX begin", "GUIDANCE_END end", "flag --source-dir",
+            "pack election for reviewer", "verified Tightbeam version 0.1.15",
+        ])
 
     def test_release_rejects_missing_or_incomplete_notes(self) -> None:
         compatibility = "Compatible with Tightbeam: None verified.\n"
