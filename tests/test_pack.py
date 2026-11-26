@@ -710,7 +710,12 @@ class ReleaseFetchTests(unittest.TestCase):
             with (
                 patch.object(release_tool, "ROOT", root),
                 patch.object(release_tool, "_previous_version", return_value="0.9.0"),
-                patch.object(release_tool, "_release_notes", return_value="Release notes."),
+                patch.object(
+                    release_tool,
+                    "_release_notes",
+                    return_value="Compatible with Tightbeam: 0.1.16, 0.1.17+5501\n"
+                    "\n### Breaking changes\n\nNone.\n",
+                ),
                 patch.object(release_tool, "private_terms_from_environment", return_value=[]),
                 patch.object(release_tool, "scan_repository", return_value=[]),
                 patch.object(release_tool, "_build_assets", return_value=tuple(assets)),
@@ -746,15 +751,21 @@ class ReleaseFetchTests(unittest.TestCase):
                 self.assertEqual(release_tool.main(), 0)
             build_assets.assert_not_called()
 
-    def test_release_without_changelog_entry_uses_default_notes(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
-            with patch.object(release_tool, "ROOT", root):
-                self.assertEqual(
-                    release_tool._release_notes("1.0.0"),
-                    "Harklight for Tightbeam v1.0.0\n",
-                )
+    def test_release_rejects_missing_or_incomplete_notes(self) -> None:
+        compatibility = "Compatible with Tightbeam: None verified.\n"
+        breaking = "### Breaking changes\n\nNone.\n"
+        cases = [
+            ("", "Compatible with Tightbeam"),
+            (breaking, "Compatible with Tightbeam"),
+            ("Compatible with Tightbeam: 0.1.x\n" + breaking, "Compatible with Tightbeam"),
+            (compatibility, "Breaking changes"),
+            (compatibility + "### Breaking changes\n\n### Other\nText.\n", "Breaking changes"),
+        ]
+        for notes, error in cases:
+            with self.subTest(notes=notes):
+                with self.assertRaisesRegex(RuntimeError, error):
+                    release_tool._validate_release_notes(notes)
+        release_tool._validate_release_notes(compatibility + breaking)
 
     def test_update_download_checks_archive_checksum(self) -> None:
         archive_buffer = io.BytesIO()

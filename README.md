@@ -101,6 +101,12 @@ release. A release workflow dispatch on main also publishes the current
 version. Setting release_policy to manual stops publication from a push. Both
 paths run the same privacy checks.
 
+Each version's changelog entry needs a `Compatible with Tightbeam:` line
+with comma-separated, exact Tightbeam versions tested with that pack. Use
+`Compatible with Tightbeam: None verified.` when no version has been verified.
+Include a `### Breaking changes` section with the changes or explicitly state
+that there are none. The publication step checks both before building assets.
+
 ## Privacy checks
 
 Configure the repository Actions secret HARKLIGHT_PACK_PRIVATE_TERMS before

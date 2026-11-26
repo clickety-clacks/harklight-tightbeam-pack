@@ -63,6 +63,22 @@ def _release_notes(version: str) -> str:
     return f"Harklight for Tightbeam v{version}\n\n{match.group(1).strip()}\n"
 
 
+def _validate_release_notes(notes: str) -> None:
+    version = r"v?[0-9]+\.[0-9]+\.[0-9]+(?:\+[A-Za-z0-9.-]+)?"
+    compatibility = rf"(?:{version}(?:,[ \t]*{version})*|None verified\.)"
+    if not re.search(rf"^Compatible with Tightbeam: {compatibility}[ \t]*$", notes, re.M):
+        raise RuntimeError(
+            "release notes require 'Compatible with Tightbeam: ' followed by "
+            "tested versions or 'None verified.'"
+        )
+    sections = re.split(r"(?m)^#{1,6}[ \t]+", notes)
+    if not any(
+        heading.strip() == "Breaking changes" and body.strip()
+        for heading, _, body in (section.partition("\n") for section in sections[1:])
+    ):
+        raise RuntimeError("release notes require a nonempty Breaking changes section")
+
+
 def _build_assets(version: str) -> tuple[Path, Path, Path]:
     pack_dir = ROOT / "pack"
     required = [
@@ -129,6 +145,7 @@ def main() -> int:
         )
         if not re.fullmatch(r"[0-9a-fA-F]{40,64}", target):
             raise RuntimeError("the release target is not a commit SHA")
+        _validate_release_notes(notes)
         archive, script, sums = _build_assets(current)
         tag = f"v{current}"
         title = f"Harklight for Tightbeam {tag}"
