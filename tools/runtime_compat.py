@@ -372,7 +372,11 @@ def _identity_digest(identity: Path) -> str:
     return digest.hexdigest()
 
 
-def check_applied(identity: Path, root: Path) -> None:
+def _note(message: str) -> None:
+    print(f"runtime compat: {message}", file=sys.stderr, flush=True)
+
+
+def check_applied(identity: Path, root: Path) -> list[str]:
     """Confirm the identity tree holds exactly what the pack promises."""
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
     skill = (root / "pack" / "skill" / SKILL_NAME / "SKILL.md").read_text(encoding="utf-8")
@@ -405,12 +409,14 @@ def check_applied(identity: Path, root: Path) -> None:
         manifest = (identity / "archetypes" / f"{role}.toml").read_text(encoding="utf-8")
         if SKILL_NAME in (tomllib.loads(manifest).get("skills") or []):
             raise RuntimeCompatError(f"role {role} elects the pack skill but is not a pack role")
+    return elected
 
 
 def _check_release(release: Release, root: Path, work: Path, harness_bin: Path) -> None:
     downloads = work / "download"
     downloads.mkdir()
     package = _download_package(release, downloads)
+    _note(f"{release.tag}: verified {package.name} sha256 {hashlib.sha256(package.read_bytes()).hexdigest()}")
     package_root = _extract(package, work / "package")
     scratch = work / "org"
     scratch.mkdir()
@@ -435,13 +441,15 @@ def _check_release(release: Release, root: Path, work: Path, harness_bin: Path) 
         )
     try:
         _wait_ready(gateway, env, scratch, log)
+        _note(f"{release.tag}: scratch gateway ready")
         _run([cli, "learn", BUNDLE], env, scratch, f"learning {BUNDLE}")
         identity = Path(env["TIGHTBEAM_BASE_DIR"]) / "identity"
         apply = [sys.executable, "-I", str(root / "bin" / "harklight_pack.py"), "apply", "--source-dir", str(root)]
         first = _run(apply, env, scratch, "pack apply")
         if "is applied" not in first:
             raise RuntimeCompatError("pack apply did not report an applied pack")
-        check_applied(identity, root)
+        elected = check_applied(identity, root)
+        _note(f"{release.tag}: pack applied; {len(elected)} roles elect {SKILL_NAME}: {', '.join(elected)}")
         before = _identity_digest(identity)
         second = _run(apply, env, scratch, "repeated pack apply")
         if "is already applied" not in second or _identity_digest(identity) != before:
@@ -449,6 +457,7 @@ def _check_release(release: Release, root: Path, work: Path, harness_bin: Path) 
         _run([cli, "identity", "status"], env, scratch, "identity status after apply")
         if gateway.poll() is not None:
             raise RuntimeCompatError(f"gateway exited during the test: {_log_tail(log)}")
+        _note(f"{release.tag}: repeated apply changed nothing; passed")
     finally:
         _stop(gateway, env, package_root, scratch)
 
