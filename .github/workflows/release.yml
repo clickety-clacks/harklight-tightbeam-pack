@@ -10,6 +10,7 @@ on:
       - bin/harklight_pack.py
       - tools/release.py
       - tools/release_checks.py
+      - tools/runtime_compat.py
       - tests/runtime/**
       - .github/workflows/release.yml
       - tools/privacy_check.py

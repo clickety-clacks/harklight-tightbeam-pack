@@ -3,26 +3,10 @@
 import ast
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 
 VERSION_PATTERN = r"[0-9]+\.[0-9]+\.[0-9]+(?:\+[A-Za-z0-9.-]+)?"
-
-
-def tested_versions(root: Path) -> tuple[str, ...]:
-    """Run every exact-version runtime case. Fixture unit tests do not count."""
-    versions = []
-    for case in sorted((root / "tests" / "runtime").glob("*.py")):
-        if not re.fullmatch(VERSION_PATTERN, case.stem):
-            raise RuntimeError(f"runtime case must name an exact Tightbeam version: {case.name}")
-        result = subprocess.run(
-            [sys.executable, str(case), str(root), case.stem], cwd=root, check=False
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Tightbeam {case.stem} compatibility test failed")
-        versions.append(case.stem)
-    return tuple(versions)
 
 
 def installer_contract(source: str) -> set[str]:

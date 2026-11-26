@@ -102,7 +102,10 @@ version. Setting release_policy to manual stops publication from a push. Both
 paths run the same privacy checks.
 
 The support window is the current full Tightbeam release and the preceding
-full release. Publication runs the pack against both exact published builds.
+full release. Publication applies the pack twice through the real identity-edit CLI of each
+exact published Linux x86_64 build. It checks the skill, guidance, elections,
+and that the repeated apply leaves the identity unchanged. This check covers
+pack installation and does not exercise Harklight traffic.
 Each version's changelog entry needs a `Compatible with Tightbeam:` line
 matching the two tested versions in lexicographic order. Use
 `Compatible with Tightbeam: From release tests.` to fill the line from CI.

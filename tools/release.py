@@ -14,7 +14,8 @@ import tarfile
 from pathlib import Path
 
 from privacy_check import private_terms_from_environment, scan_repository
-from release_checks import breaking_signals, tested_versions
+from release_checks import breaking_signals
+from runtime_compat import tested_versions
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -192,7 +193,9 @@ def main() -> int:
         if not re.fullmatch(r"[0-9a-fA-F]{40,64}", target):
             raise RuntimeError("the release target is not a commit SHA")
         _require_breaking_changes_review(target)
-        verified = tested_versions(ROOT)
+        verified = tuple(version.removeprefix("v") for version in tested_versions(ROOT))
+        if len(verified) != 2 or len(set(verified)) != 2:
+            raise RuntimeError("release requires two distinct verified Tightbeam versions")
         signals = []
         if previous:
             published = json.loads(_run(["gh", "release", "view", "--json", "tagName,body"]))
