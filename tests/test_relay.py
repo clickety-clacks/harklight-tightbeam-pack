@@ -1,0 +1,148 @@
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pack" / "relay"))
+
+from addresses import Addresses
+from relay import Relay
+from relay_state import RelayState
+
+
+SEND = {
+    "id": "conversation",
+    "conversation_id": "conversation",
+    "kind": "send",
+    "addresses": ["user:reader", "user:unmapped"],
+    "title": "Launch",
+    "body": "Choose the launch date.",
+    "choices": [{"id": "thu", "label": "Thursday"}],
+    "answer_rule": {"kind": "named", "address": "user:reader"},
+}
+ANSWER = {
+    "kind": "answer",
+    "rev": 20,
+    "data": {
+        "item_id": "shared-item",
+        "answer_id": "answer-1",
+        "request_revision": 1,
+        "terminal": {
+            "answer": "thu",
+            "speaker": {"kind": "person", "id": "person-1", "display_name": "Reader"},
+        },
+    },
+}
+
+
+class AgentFixture:
+    def __init__(self):
+        self.calls = []
+        self.receipts = []
+        self.failure = None
+
+    def write(self, operation_id, request):
+        self.calls.append((operation_id, request))
+        if self.failure:
+            raise self.failure
+        return {
+            "server_id": "service",
+            "item_id": "shared-item",
+            "recipients": [{"person_id": "person-1", "status": "reached"}],
+        }
+
+    def changes(self, checkpoint):
+        if checkpoint != {"rev": 20}:
+            yield "service", ANSWER, {"rev": 20}
+
+    def receipt(self, operation_id, event):
+        self.receipts.append((operation_id, event["event_id"]))
+
+
+class PeopleFixture:
+    def __init__(self):
+        self.records = [SEND]
+        self.reports = []
+        self.events = []
+        self.lose_report_response = False
+        self.lose_event_response = False
+
+    def collect(self):
+        return self.records[:]
+
+    def report(self, result):
+        self.reports.append(result)
+        self.records.clear()
+        if self.lose_report_response:
+            raise RuntimeError("no report response")
+
+    def event(self, event):
+        self.events.append(event)
+        if self.lose_event_response:
+            raise RuntimeError("no event response")
+
+
+class RelayTests(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.path = Path(folder.name) / "relay.db"
+        self.agent = AgentFixture()
+        self.people = PeopleFixture()
+
+    def relay(self, users):
+        state = RelayState(self.path, "connection", "sender")
+        self.addCleanup(state.close)
+        return Relay(state, Addresses(users), self.people, self.agent)
+
+    def test_unknown_send_reuses_operation_and_mapping(self):
+        relay = self.relay({"reader": "person-1"})
+        self.agent.failure = RuntimeError("no send response")
+        with self.assertRaisesRegex(RuntimeError, "no send response"):
+            relay.outbound()
+        self.agent.failure = None
+        self.relay({"reader": "person-2"}).outbound()
+        self.assertEqual(self.agent.calls[0], self.agent.calls[1])
+        self.assertEqual(self.agent.calls[0][1]["answer_policy"],
+                         {"kind": "named", "people": ["person-1"]})
+        self.assertCountEqual(
+            self.people.reports[0]["outcomes"],
+            [
+                {"address": "user:reader", "status": "reached"},
+                {"address": "user:unmapped", "status": "not_reachable",
+                 "reason": "no_person_mapping"},
+            ],
+        )
+
+    def test_lost_report_and_event_acknowledgments_replay_original_data(self):
+        relay = self.relay({"reader": "person-1"})
+        self.people.lose_report_response = True
+        with self.assertRaisesRegex(RuntimeError, "no report response"):
+            relay.outbound()
+        self.people.lose_report_response = False
+        relay.outbound()
+        self.assertEqual(len(self.agent.calls), 1)
+        self.assertEqual(self.people.reports[0], self.people.reports[1])
+
+        self.people.lose_event_response = True
+        with self.assertRaisesRegex(RuntimeError, "no event response"):
+            relay.inbound()
+        self.assertIsNone(relay.state.checkpoint())
+        self.assertEqual(self.agent.receipts, [])
+        self.people.lose_event_response = False
+        restarted = self.relay({"replacement": "person-1"})
+        restarted.inbound()
+        self.assertEqual(self.people.events[0], self.people.events[1])
+        self.assertEqual(self.people.events[1]["speaker"]["address"], "user:reader")
+        self.assertEqual(restarted.state.checkpoint(), {"rev": 20})
+        self.assertEqual(len(self.agent.receipts), 1)
+
+    def test_atomic_refusal_has_no_address_outcomes_or_remote_binding(self):
+        relay = self.relay({"reader": "person-1"})
+        refusal = {"code": "recipient_refused", "message": "Recipient outside organization"}
+        self.agent.write = lambda *_: {"refusal": refusal}
+        relay.outbound()
+        self.assertEqual(self.people.reports, [
+            {"id": "conversation", "outcomes": [], "refusal": refusal}
+        ])
+        self.assertIsNone(relay.state.binding("conversation"))
