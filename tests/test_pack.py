@@ -690,6 +690,40 @@ class ApplyTests(unittest.TestCase):
 
 
 class ReleaseFetchTests(unittest.TestCase):
+    def test_release_archive_excludes_unreleased_relay(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "VERSION").write_text("0.2.2\n", encoding="utf-8")
+            files = {
+                "pack/skill/harklight-agent/SKILL.md": "skill bytes",
+                "pack/guidance.md": "guidance bytes",
+                "pack/elections.json": '{"roles":["default"]}',
+                "pack/relay/relay.py": "# staged relay",
+                "bin/harklight_pack.py": "# installer",
+            }
+            for name, text in files.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+
+            with patch.object(release_tool, "ROOT", root), patch.object(
+                release_tool, "DIST", root / "dist"
+            ):
+                archive, installer, checksums = release_tool._build_assets("0.2.2")
+
+            prefix = "harklight-pack-v0.2.2/"
+            with tarfile.open(archive) as built:
+                self.assertCountEqual(
+                    [member.name.removeprefix(prefix) for member in built if member.isfile()],
+                    ["VERSION", "pack/skill/harklight-agent/SKILL.md",
+                     "pack/guidance.md", "pack/elections.json"],
+                )
+                for name in ("pack/skill/harklight-agent/SKILL.md", "pack/guidance.md",
+                             "pack/elections.json"):
+                    self.assertEqual(built.extractfile(prefix + name).read().decode(), files[name])
+            self.assertEqual(installer.read_text(encoding="utf-8"), files["bin/harklight_pack.py"])
+            self.assertEqual(len(checksums.read_text(encoding="utf-8").splitlines()), 2)
+
     def test_release_targets_the_workflow_commit_sha(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

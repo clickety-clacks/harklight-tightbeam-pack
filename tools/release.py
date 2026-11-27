@@ -78,7 +78,11 @@ def _build_assets(version: str) -> tuple[Path, Path, Path]:
         shutil.rmtree(stage)
     stage.mkdir()
     shutil.copy2(ROOT / "VERSION", stage / "VERSION")
-    shutil.copytree(pack_dir, stage / "pack")
+    # The relay stays in source while its distribution is reviewed separately.
+    def exclude_relay(directory: str, names: list[str]) -> set[str]:
+        return {"relay"} if Path(directory) == pack_dir and "relay" in names else set()
+
+    shutil.copytree(pack_dir, stage / "pack", ignore=exclude_relay)
 
     archive_path = DIST / f"harklight-pack-v{version}.tar.gz"
     with tarfile.open(archive_path, "w:gz") as archive:
