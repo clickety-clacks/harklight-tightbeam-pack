@@ -311,3 +311,56 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(relay.state.pending_event(), pending)
         self.assertEqual(relay.state.checkpoint(), {"rev": 19})
         self.assertIsNone(relay.state.db.execute("SELECT 1 FROM refused_events").fetchone())
+
+    def test_group_send_reports_one_address_and_binds_one_conversation(self):
+        relay = self.relay({"reader": "person-1"})
+        self.people.records = [{**SEND, "addresses": ["group-id:opaque-group"]}]
+        self.agent.write = lambda operation_id, request: self.group_receipt(operation_id, request)
+        relay.outbound()
+        [(operation_id, request)] = self.agent.calls
+        self.assertTrue(operation_id)
+        self.assertEqual(request["selector"], {"kind": "group", "group_id": "opaque-group"})
+        self.assertEqual(request["answer_policy"], {"kind": "named", "people": ["person-1"]})
+        self.assertEqual(self.people.reports, [{
+            "id": "conversation", "outcomes": [
+                {"address": "group-id:opaque-group", "status": "reached"},
+            ],
+            "server_id": "service", "remote_conversation_id": "shared-item", "remote_revision": 1,
+        }])
+
+    def group_receipt(self, operation_id, request):
+        self.agent.calls.append((operation_id, request))
+        return {
+            "server_id": "service", "item_id": "shared-item", "remote_revision": 1,
+            "recipients": {"kind": "group", "group_id": "opaque-group"},
+        }
+
+    def test_group_name_and_first_answer_policy_are_frozen_during_retry(self):
+        relay = self.relay({"reader": "person-1"})
+        self.people.records = [{
+            **SEND, "addresses": ["group:Release Team"], "answer_rule": {"kind": "first"}
+        }]
+        self.agent.failure = RuntimeError("no send response")
+        with self.assertRaisesRegex(RuntimeError, "no send response"):
+            relay.outbound()
+        self.agent.write = self.group_receipt
+        self.relay({"reader": "different-person"}).outbound()
+        self.assertEqual(self.agent.calls[0], self.agent.calls[1])
+        request = self.agent.calls[1][1]
+        self.assertEqual(request["selector"], {"kind": "group", "name": "Release Team"})
+        self.assertEqual(request["answer_policy"], {"kind": "first"})
+        self.assertEqual(self.people.reports[0]["outcomes"], [
+            {"address": "group:Release Team", "status": "reached"},
+        ])
+
+    def test_group_decider_refusal_does_not_invent_member_outcomes(self):
+        relay = self.relay({"reader": "person-1"})
+        self.people.records = [{**SEND, "addresses": ["group:Release Team"]}]
+        self.agent.write = lambda *_: {
+            "refusal": {"code": "decider_unreachable", "message": "Decider unavailable"}
+        }
+        relay.outbound()
+        self.assertEqual(self.people.reports, [{
+            "id": "conversation", "outcomes": [],
+            "refusal": {"code": "decider_unreachable", "message": "Decider unavailable"},
+        }])

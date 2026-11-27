@@ -33,3 +33,22 @@ class AgentCLITests(unittest.TestCase):
         with patch.object(self.cli, "run", return_value=(2, [refused])) as run:
             self.assertEqual(self.cli.mutation("journal", "op", ["send"]), refused)
             run.assert_called_once()
+
+    def test_unavailable_group_capability_refuses_only_a_new_operation(self):
+        absent = {"kind": "operation_absent", "op_id": "op", "journal_id": "journal"}
+        with patch.object(self.cli, "run", return_value=(1, [absent])) as run:
+            self.assertEqual(
+                self.cli.mutation("journal", "op", ["send", "--group-id=group"],
+                                  prepare=True, unavailable=True)["error"],
+                "unsupported",
+            )
+            run.assert_called_once()
+
+        committed = {"kind": "committed", "op_id": "op", "response": {"rev": 3}}
+        with patch.object(self.cli, "run", return_value=(0, [committed])) as run:
+            self.assertEqual(
+                self.cli.mutation("journal", "op", ["send", "--group-id=group"],
+                                  prepare=True, unavailable=True),
+                committed,
+            )
+            run.assert_called_once()

@@ -137,6 +137,30 @@ class ReadinessTests(unittest.TestCase):
             relay.receipts.assert_called()
             watch.close_child("listener")
 
+    def test_group_reconnect_keeps_feed_scope_in_durable_checkpoints(self):
+        relay = MagicMock()
+        relay.outbound.return_value = False
+        relay.apply_change.return_value = True
+        relay.agent.server_id = "example"
+        relay.agent.follow_args.return_value = ["fixture"]
+        relay.state.checkpoint.return_value = {
+            "rev": 19, "continuation": "group-scope", "groups": True,
+        }
+        watch = RelayWatch(relay)
+        self.addCleanup(watch.selector.close)
+        watch.listener_started = True
+        with patch("relay_watch.RelayProcess"):
+            watch.start_listener()
+            watch.listener([ANSWER], False)
+            relay.agent.refresh_capabilities.assert_called_once()
+            relay.agent.follow_args.assert_called_once_with({
+                "rev": 19, "continuation": "group-scope", "groups": True,
+            })
+            relay.apply_change.assert_called_once_with("example", ANSWER, {
+                "rev": 20, "continuation": "group-scope", "groups": True,
+            })
+            watch.close_child("listener")
+
     def test_listener_logs_expiry_before_reset(self):
         relay = MagicMock()
         watch = RelayWatch(relay)
@@ -189,7 +213,7 @@ class SenderRecoveryTests(unittest.TestCase):
 
             watched = RelayWatch(relay)
             with patch.object(state, "complete_event", side_effect=RuntimeError("interrupted")):
-                watched.listener_continuation = "scope"
+                watched.listener_scope = {"continuation": "scope"}
                 with self.assertRaisesRegex(RuntimeError, "interrupted"):
                     watched.listener([ANSWER], False)
             first = people.events[0]
