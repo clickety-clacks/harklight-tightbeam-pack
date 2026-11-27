@@ -9,10 +9,12 @@ import subprocess
 import sys
 import time
 
+from harklight_agent import report_retention_gap
 from relay_process import RelayProcess
 from tightbeam_people import TightbeamRefusal
 
 
+OUTBOUND_BATCH = 8
 RETRY_SECONDS = 15
 WAIT_TIMEOUT_SECONDS = 30
 RETRYABLE = (OSError, RuntimeError, ValueError, KeyError, TypeError, sqlite3.Error,
@@ -66,14 +68,9 @@ class RelayWatch:
         self.close_child(role)
         self.retry_at[role] = time.monotonic() + RETRY_SECONDS
 
-    def drain(self) -> None:
-        while self.relay.outbound():
-            pass
-
-    def drain_ready(self) -> bool:
+    def outbound_batch(self) -> bool | None:
         try:
-            self.drain()
-            return True
+            return self.relay.outbound(limit=OUTBOUND_BATCH)
         except RETRYABLE as error:
             if isinstance(error, TightbeamRefusal) and (
                 error.status in {401, 403}
@@ -82,11 +79,17 @@ class RelayWatch:
                 raise
             self.log("outbound retry", error)
             self.delay("readiness")
-            return False
+            return None
 
     def start_readiness(self, *, drain: bool = True) -> None:
-        if drain and not self.drain_ready():
-            return
+        if drain:
+            ready = self.outbound_batch()
+            if ready:
+                # Give the listener and receipts a scheduling turn before
+                # collecting another bounded batch.
+                self.retry_at["readiness"] = 0.0
+            if ready is not False:
+                return
         if not self.wait_supported:
             self.delay("readiness")
             return
@@ -121,7 +124,7 @@ class RelayWatch:
 
     def start_listener(self) -> None:
         if self.listener_started:
-            self.drain_ready()
+            self.outbound_batch()
         self.listener_started = True
         try:
             self.relay.inbound()
@@ -141,6 +144,7 @@ class RelayWatch:
             kind = frame["kind"]
             if kind == "cursor_expired":
                 self.close_child("listener")
+                report_retention_gap()
                 self.relay.state.advance(None)
                 self.retry_at["listener"] = 0.0
                 return

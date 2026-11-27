@@ -10,6 +10,11 @@ import sys
 from agent_cli import AgentCLI
 
 
+def report_retention_gap() -> None:
+    print("Harklight people relay: sender feed position expired; rebuilding the pending baseline. "
+          "Earlier historical events may be unavailable.", file=sys.stderr)
+
+
 class HarklightAgent:
     def __init__(self, cli: AgentCLI, sender: str, state):
         self.cli = cli
@@ -140,6 +145,7 @@ class HarklightAgent:
         if status == 2 and any(
             row.get("kind") in {"cursor_expired", "token_invalid"} for row in rows
         ):
+            report_retention_gap()
             yield self.server_id, None, None
             return
         if status:

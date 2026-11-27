@@ -108,17 +108,23 @@ class Relay:
             result = json.loads(row["result"])
         self.report(result)
 
-    def outbound(self) -> bool:
+    def outbound(self, limit: int | None = None) -> bool:
         attempted = set()
         errors = []
-        for result in self.state.unreported():
+        for result in self.state.unreported(limit):
             attempted.add(result["id"])
             try:
                 self.report(result)
             except (KeyError, TypeError, OSError, ValueError, RuntimeError,
                     subprocess.SubprocessError) as error:
                 errors.append(error)
-        records = self.people.collect()
+        remaining = None if limit is None else limit - len(attempted)
+        if remaining is None:
+            records = self.people.collect()
+        elif remaining > 0:
+            records = self.people.collect(limit=remaining)
+        else:
+            records = []
         for record in records:
             if record["id"] not in attempted:
                 try:
@@ -128,7 +134,7 @@ class Relay:
                     errors.append(error)
         if errors:
             raise errors[0]
-        return bool(records)
+        return bool(records) or remaining == 0
 
     def accept_pending(self) -> None:
         pending = self.state.pending_event()
@@ -248,7 +254,9 @@ def main() -> int:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                raise RuntimeError("another relay already owns this state directory") from None
+                if args.watch:
+                    raise RuntimeError("another relay already owns this state directory") from None
+                return 0
             state = RelayState(args.state_dir / "relay.db", connection, sender)
             try:
                 agent = HarklightAgent(AgentCLI(connection, args.state_dir / "agent"), sender, state)

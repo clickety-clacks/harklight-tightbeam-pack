@@ -125,9 +125,10 @@ class RelayState:
         ).fetchone()
         return row is not None
 
-    def unreported(self) -> list[dict]:
+    def unreported(self, limit: int | None = None) -> list[dict]:
         rows = self.db.execute(
-            "SELECT result FROM writes WHERE result IS NOT NULL AND reported = 0"
+            "SELECT result FROM writes WHERE result IS NOT NULL AND reported = 0 ORDER BY rowid LIMIT ?",
+            (-1 if limit is None else limit,),
         )
         return [json.loads(row[0]) for row in rows]
 

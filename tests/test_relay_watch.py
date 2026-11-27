@@ -11,10 +11,11 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pack" / "relay"))
 
 from addresses import Addresses
+from harklight_agent import HarklightAgent
 from relay import Relay
 from relay_process import RelayProcess
 from relay_state import RelayState
-from relay_watch import RelayWatch, readiness_failure
+from relay_watch import OUTBOUND_BATCH, RelayWatch, readiness_failure
 from test_relay import ANSWER, AgentFixture, PeopleFixture
 
 
@@ -33,6 +34,9 @@ class ReadinessTests(unittest.TestCase):
             # The send appeared while replacing the old idle wait. The new
             # wait sees it, and reporting it makes the next collect eligible.
             watch.readiness([{"records": [{"id": "send"}]}], True)
+            self.assertEqual(relay.outbound.call_count, 2)
+            watch.start_readiness()
+            watch.start_readiness()
             self.assertEqual(relay.outbound.call_count, 4)
             self.assertEqual(child.call_count, 3)
             watch.close_child("readiness")
@@ -90,7 +94,7 @@ class ReadinessTests(unittest.TestCase):
             finally:
                 process.close()
 
-    def test_finite_and_watch_refuse_locked_state_before_any_cli_io(self):
+    def test_locked_state_preserves_finite_noop_and_rejects_second_watcher(self):
         script = Path(__file__).resolve().parents[1] / "pack" / "relay" / "relay.py"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -98,15 +102,65 @@ class ReadinessTests(unittest.TestCase):
             config.write_text(json.dumps({"users": {}, "connection": str(root), "sender": "sender"}))
             with (root / "run.lock").open("a") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                for mode in ([], ["--watch"]):
+                for mode, exit_status in (([], 0), (["--watch"], 1)):
                     result = subprocess.run(
                         [sys.executable, str(script), "--config", str(config),
                          "--state-dir", str(root), *mode], capture_output=True, text=True,
                         timeout=5,
                     )
-                    self.assertEqual(result.returncode, 1)
-                    self.assertIn("another relay already owns this state directory", result.stderr)
+                    self.assertEqual(result.returncode, exit_status)
+                    if mode:
+                        self.assertIn("another relay already owns this state directory", result.stderr)
+                    else:
+                        self.assertEqual(result.stderr, "")
                     self.assertFalse((root / "relay.db").exists())
+
+    def test_always_ready_outbound_yields_to_listener_and_receipts(self):
+        relay = MagicMock()
+        relay.outbound.side_effect = [True, True, AssertionError("outbound did not yield")]
+        relay.agent.server_id = "server"
+        relay.agent.follow_args.return_value = ["fixture"]
+        relay.state.checkpoint.return_value = {"rev": 19, "continuation": "scope"}
+        relay.apply_change.return_value = True
+        watch = RelayWatch(relay)
+        self.addCleanup(watch.selector.close)
+        with patch("relay_watch.RelayProcess") as child, patch.object(
+            watch.selector, "select", return_value=[(MagicMock(data="listener"), 1)]
+        ):
+            child.return_value.frames.return_value = ([ANSWER], False)
+            watch.tick()
+            watch.tick()
+            relay.inbound.assert_called_once()
+            self.assertEqual(relay.outbound.call_count, 2)
+            relay.outbound.assert_called_with(limit=OUTBOUND_BATCH)
+            self.assertEqual(relay.apply_change.call_count, 2)
+            relay.receipts.assert_called()
+            watch.close_child("listener")
+
+    def test_listener_logs_expiry_before_reset(self):
+        relay = MagicMock()
+        watch = RelayWatch(relay)
+        self.addCleanup(watch.selector.close)
+        with patch("relay_watch.report_retention_gap") as report:
+            def advance(position):
+                self.assertIsNone(position)
+                report.assert_called_once()
+
+            relay.state.advance.side_effect = advance
+            watch.listener([{"kind": "cursor_expired", "rev": 9}], True)
+            relay.state.advance.assert_called_once_with(None)
+
+    def test_finite_read_logs_expiry_before_emitting_reset(self):
+        cli = MagicMock()
+        cli.one.side_effect = [
+            {"journal_id": "journal"}, {"server_id": "server", "shared_messages": True},
+        ]
+        cli.run.return_value = (2, [{"kind": "cursor_expired", "rev": 9}])
+        agent = HarklightAgent(cli, "sender", MagicMock())
+        with patch("harklight_agent.report_retention_gap") as report:
+            changes = agent.changes({"rev": 9, "continuation": "scope"})
+            self.assertEqual(next(changes), ("server", None, None))
+            report.assert_called_once()
 
     def test_child_disconnect_discards_partial_frame(self):
         with selectors.DefaultSelector() as selector:
