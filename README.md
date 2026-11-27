@@ -16,6 +16,13 @@ if using the web client, Web 0.2.5 or later in the 0.2 series. Tightbeam
 requires its matching protocol 0.2 integration. iOS release compatibility
 has not been verified.
 
+Native Tightbeam FYI, delivered Chat and Seen, and same-thread
+acknowledgment, reply, and result were verified on Tightbeam
+`0.1.17+5505`, Agent `0.2.3`, and Server `0.2.20`. Isolated checks
+also exercised ordinary pack commands with that Tightbeam and Agent
+pair on Server `0.2.19`. This is scoped native command evidence.
+It does not expand the pack's general component support window.
+
 The source targets are Agent
 [`5771877`](https://github.com/clickety-clacks/harklight-agent/commit/5771877daa1c3073c71ec7958802742a26ec90f5)
 and Tightbeam [PR #886](https://github.com/clickety-clacks/tightbeam/pull/886)
