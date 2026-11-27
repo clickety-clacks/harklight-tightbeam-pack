@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pack" / "relay"))
 
@@ -119,6 +119,7 @@ class ReadinessTests(unittest.TestCase):
         relay = MagicMock()
         relay.outbound.side_effect = [True, True, AssertionError("outbound did not yield")]
         relay.agent.server_id = "server"
+        relay.agent.groups = False
         relay.agent.follow_args.return_value = ["fixture"]
         relay.state.checkpoint.return_value = {"rev": 19, "continuation": "scope"}
         relay.apply_change.return_value = True
@@ -142,6 +143,7 @@ class ReadinessTests(unittest.TestCase):
         relay.outbound.return_value = False
         relay.apply_change.return_value = True
         relay.agent.server_id = "example"
+        relay.agent.groups = True
         relay.agent.follow_args.return_value = ["fixture"]
         relay.state.checkpoint.return_value = {
             "rev": 19, "continuation": "group-scope", "groups": True,
@@ -153,6 +155,8 @@ class ReadinessTests(unittest.TestCase):
             watch.start_listener()
             watch.listener([ANSWER], False)
             relay.agent.refresh_capabilities.assert_called_once()
+            self.assertLess(relay.mock_calls.index(call.agent.refresh_capabilities()),
+                            relay.mock_calls.index(call.outbound(limit=OUTBOUND_BATCH)))
             relay.agent.follow_args.assert_called_once_with({
                 "rev": 19, "continuation": "group-scope", "groups": True,
             })
@@ -160,6 +164,21 @@ class ReadinessTests(unittest.TestCase):
                 "rev": 20, "continuation": "group-scope", "groups": True,
             })
             watch.close_child("listener")
+
+    def test_agent_internal_reconnect_restarts_on_capability_scope_change(self):
+        relay = MagicMock()
+        relay.agent.groups = False
+        relay.agent.refresh_capabilities.side_effect = lambda: setattr(relay.agent, "groups", True)
+        watch = RelayWatch(relay)
+        self.addCleanup(watch.selector.close)
+        watch.listener_scope = {"continuation": "old-shared", "groups": False}
+        child = MagicMock()
+        watch.children["listener"] = child
+        watch.listener([{"kind": "caught_up", "rev": 20}], False)
+        self.assertNotIn("listener", watch.children)
+        child.close.assert_called_once()
+        relay.apply_change.assert_not_called()
+        self.assertEqual(watch.retry_at["listener"], 0.0)
 
     def test_listener_logs_expiry_before_reset(self):
         relay = MagicMock()

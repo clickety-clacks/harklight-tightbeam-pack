@@ -2,10 +2,11 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pack" / "relay"))
 
+from agent_cli import AgentCLI
 from harklight_agent import HarklightAgent
 
 
@@ -96,3 +97,32 @@ class GroupCLITests(unittest.TestCase):
         self.cli.mutation.assert_called_once_with(
             "journal", "op", ["receipt", "--item-id", "shared", "--groups", "--answer-id", "answer"],
         )
+
+    def test_fresh_group_send_checks_current_capabilities_after_journal_lookup(self):
+        cli = AgentCLI("connection", Path("/unused"))
+        state = MagicMock()
+        state.session_id.return_value = "session"
+        absent = {"kind": "operation_absent", "op_id": "op", "journal_id": "journal"}
+        prepared = {"kind": "prepared", "op_id": "op"}
+        committed = {
+            "kind": "committed", "op_id": "op", "item_id": "shared",
+            "response": {"message": {"revision": 1, "shared": {"shared_id": "shared"}},
+                         "recipients": {"kind": "group", "group_id": "id"}},
+        }
+        with patch.object(cli, "run", side_effect=[
+            (0, [{"journal_id": "journal"}]),
+            (0, [{"server_id": "example", "shared_messages": True, "groups": False}]),
+            (1, [absent]),
+            (0, [{"server_id": "example", "shared_messages": True, "groups": True}]),
+            (0, [prepared]),
+            (0, [committed]),
+        ]) as run, patch.object(cli, "supports_groups", return_value=True):
+            agent = HarklightAgent(cli, "sender", state)
+            outcome = agent.write("op", {
+                "kind": "send", "selector": {"kind": "group", "group_id": "id"},
+                "title": "Group request", "body": "Body", "answer_policy": None, "choices": [],
+            })
+        self.assertEqual(outcome["item_id"], "shared")
+        self.assertEqual([call.args[0] for call in run.call_args_list], [
+            "journal-id", "capabilities", "retry", "capabilities", "send", "send",
+        ])

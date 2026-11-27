@@ -1,7 +1,7 @@
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pack" / "relay"))
 
@@ -36,19 +36,23 @@ class AgentCLITests(unittest.TestCase):
 
     def test_unavailable_group_capability_refuses_only_a_new_operation(self):
         absent = {"kind": "operation_absent", "op_id": "op", "journal_id": "journal"}
+        available = Mock(return_value=False)
         with patch.object(self.cli, "run", return_value=(1, [absent])) as run:
             self.assertEqual(
                 self.cli.mutation("journal", "op", ["send", "--group-id=group"],
-                                  prepare=True, unavailable=True)["error"],
+                                  prepare=True, available=available)["error"],
                 "unsupported",
             )
             run.assert_called_once()
+            available.assert_called_once()
 
+        available.reset_mock()
         committed = {"kind": "committed", "op_id": "op", "response": {"rev": 3}}
         with patch.object(self.cli, "run", return_value=(0, [committed])) as run:
             self.assertEqual(
                 self.cli.mutation("journal", "op", ["send", "--group-id=group"],
-                                  prepare=True, unavailable=True),
+                                  prepare=True, available=available),
                 committed,
             )
             run.assert_called_once()
+            available.assert_not_called()

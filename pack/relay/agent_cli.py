@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
+from typing import Callable
 
 
 class AgentCLI:
@@ -33,14 +34,14 @@ class AgentCLI:
         )
 
     def mutation(self, journal_id: str, operation_id: str, args: list[str], *,
-                 prepare: bool = False, unavailable: bool = False) -> dict:
+                 prepare: bool = False, available: Callable[[], bool] | None = None) -> dict:
         status, rows = self.run(
             "retry", "--op-id", operation_id, "--journal-id", journal_id,
         )
         if status == 1 and len(rows) == 1 and rows[0] == {
             "kind": "operation_absent", "op_id": operation_id, "journal_id": journal_id,
         }:
-            if unavailable:
+            if available is not None and not available():
                 return {"kind": "refused", "op_id": operation_id, "status": 400, "error": "unsupported"}
             if prepare:
                 status, rows = self.run(*args, "--op-id", operation_id, "--prepare")

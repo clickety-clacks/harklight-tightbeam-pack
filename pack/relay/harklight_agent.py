@@ -33,6 +33,10 @@ class HarklightAgent:
         self.shared = capabilities.get("shared_messages", False)
         self.groups = self.shared and capabilities.get("groups", False) and self.cli.supports_groups()
 
+    def group_send_available(self) -> bool:
+        self.refresh_capabilities()
+        return self.groups
+
     def refusal(self, code: str, message: str) -> dict:
         return {"refusal": {"code": code, "message": message}}
 
@@ -49,7 +53,7 @@ class HarklightAgent:
                 args = self.conversation_args(request, payload)
             result = self.cli.mutation(
                 self.journal, operation_id, args, prepare=kind == "send",
-                unavailable=group_send and not self.groups,
+                available=self.group_send_available if group_send else None,
             )
 
         if result["kind"] == "refused":

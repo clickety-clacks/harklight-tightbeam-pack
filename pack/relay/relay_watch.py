@@ -124,12 +124,16 @@ class RelayWatch:
 
     def start_listener(self) -> None:
         reconnect = self.listener_started
-        if reconnect:
-            self.outbound_batch()
         self.listener_started = True
-        try:
-            if reconnect:
+        if reconnect:
+            try:
                 self.relay.agent.refresh_capabilities()
+            except RETRYABLE as error:
+                self.log("sender capability retry", error)
+                self.delay("listener")
+                return
+            self.outbound_batch()
+        try:
             self.relay.inbound()
             checkpoint = self.relay.state.checkpoint()
             if checkpoint is None or "token" in checkpoint:
@@ -144,6 +148,13 @@ class RelayWatch:
             self.log("sender catch-up retry", error)
             self.delay("listener")
 
+    def restart_if_scope_changed(self) -> bool:
+        if bool(self.listener_scope.get("groups")) == self.relay.agent.groups:
+            return False
+        self.close_child("listener")
+        self.retry_at["listener"] = 0.0
+        return True
+
     def listener(self, frames: list[dict], ended: bool) -> None:
         for frame in frames:
             kind = frame["kind"]
@@ -155,6 +166,11 @@ class RelayWatch:
                 return
             if kind == "focus":
                 continue
+            if kind == "caught_up":
+                # The Agent can reconnect internally without exiting.
+                self.relay.agent.refresh_capabilities()
+                if self.restart_if_scope_changed():
+                    return
             revision = frame["rev"]
             if type(revision) is not int or revision < self.relay.state.checkpoint()["rev"]:
                 raise ValueError("Harklight sender feed revision moved backwards")
@@ -180,6 +196,8 @@ class RelayWatch:
             self.delay("readiness")
         if "readiness" not in self.children and now >= self.retry_at["readiness"]:
             self.start_readiness()
+        if "listener" in self.children:
+            self.restart_if_scope_changed()
         if "listener" not in self.children and now >= self.retry_at["listener"]:
             self.start_listener()
         if now >= self.retry_at["receipts"]:
