@@ -260,7 +260,7 @@ not mean Seen, handed or acted.
 on attached content is the download ID; downloading by upload handle fails.
 Revise's same-item reuse is the specific exception described above.
 
-## Handle a delivered Chat or answer
+## Handle a delivered change
 
 Use the handle, item ID and delivered event ID from the Tightbeam wake.
 `tightbeam harklight-read --handle "$HARKLIGHT_HANDLE"` reads entries
@@ -306,7 +306,7 @@ reports a paused or held feed, use
 `tightbeam harklight-retry --session "$HARKLIGHT_HANDLE"` and read its
 outcome. Escalate repeated feed failures with the recorded diagnostic.
 
-## Handle a standalone Agent delivery
+**Standalone Agent delivery**
 
 Use the raw commands in this section for separately authorized standalone
 operations. For a Tightbeam wake, use the native commands above.
