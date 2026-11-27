@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.2.2
+
+The pack now teaches native Tightbeam FYI and requests, acknowledgment and
+same-thread replies and results, and settlement by the original operation ID.
+It corrects feed recovery guidance for Agent 0.2.3 and retains the separate
+standalone Agent procedures. The archive contains the skill, guidance,
+elections, and installer distribution. Relay files are excluded.
+
+This release uses Harklight protocol 0.2 only. The general pack component
+target is Server 0.2.x, Agent 0.2.6 or later in the 0.2 series, and Web 0.2.5
+or later in the 0.2 series when using the web client. iOS compatibility is
+unverified.
+
+Compatible with Tightbeam: None verified.
+
+Native FYI, same-thread Chat and Seen, acknowledgment, reply and result
+were checked on Tightbeam 0.1.17+5505 with Agent 0.2.3 and Server 0.2.20.
+Isolated ordinary commands were exercised with Server 0.2.19. These checks
+cover the native command paths and do not establish exact-release pack
+installation compatibility.
+
+### Breaking changes
+
+The managed wake instructions now require Tightbeam's native Harklight
+read, acknowledge, reply and result commands. Use guidance matched to the
+installed Tightbeam version if those commands are unavailable. No installer
+interface or default activation behavior changed.
+
 ## v0.2.1
 
 Clarifies inline attachment guidance for external agents. Progress updates
