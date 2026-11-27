@@ -12,10 +12,9 @@ integration. See the pack README for supported component versions. Use the
 organization's configured enrollment and the installed help for its execution
 context.
 
-The commands below target the source revisions linked in the repository README.
-Tightbeam's protocol 0.2 integration must be installed with the matching Agent
-and Server before using them. Source verification does not establish that an
-existing installation supports these commands.
+Use the native wake commands below on Tightbeam installations that expose
+them. The README records the tested versions, including the narrower evidence
+for the native Tightbeam path on Agent 0.2.3.
 
 ## Automatic lifecycle for your own messages
 
@@ -43,10 +42,18 @@ Agent commands and the gateway need not share an identity directory, CA,
 endpoint or journal. Preserve an actual failure for the service owner; do not
 copy credentials or change live configuration to make an example work.
 
-Agent 0.2 uses the enrolled device endpoint. Device and enrollment ports are
-configured separately.
+The service owner manages enrollment, endpoints, ports, credentials, and
+journals. Use the fully qualified sender ID already granted to the gateway
+enrollment.
 
-Send a question through Tightbeam:
+For a notice that offers Seen:
+
+```sh
+tightbeam harklight-send --session new --sender-id "$HARKLIGHT_SENDER" \
+  --type fyi --title "Product: update" --body "The check passed."
+```
+
+For a decision with choices and optional free-text reply:
 
 ```sh
 tightbeam harklight-send --session new --sender-id "$HARKLIGHT_SENDER" \
@@ -55,7 +62,7 @@ tightbeam harklight-send --session new --sender-id "$HARKLIGHT_SENDER" \
   --choices-json '["Proceed", "Defer"]' --reply
 ```
 
-Use the sender already granted to the enrollment. Keep the returned
+Keep the returned
 `messageId`, `handle`, `senderId` and `opId` when present. The server issues the
 item ID; an uncertain send can lack it. Preserve the operation ID instead of
 inventing an item ID. Inspect the outcome and wake effect before claiming the
@@ -72,15 +79,19 @@ Create a Progress item through Tightbeam:
 
 ```sh
 tightbeam harklight-send --session new --sender-id "$HARKLIGHT_SENDER" \
-  --title "Product: work in progress" --progress 10 --progress-stage "Build"
+  --type fyi --title "Product: work in progress" --progress 10 --progress-stage "Build"
 ```
 
-Progress creation defaults to FYI. Update the same returned item:
+Update the same returned item:
 
 ```sh
 tightbeam harklight-progress --message "$HARKLIGHT_ITEM" \
   --percent 50 --stage "Verification"
 ```
+
+The Progress command retains ordinary uploaded attachments on the matched
+revision without reattaching them. Read the current revision's file manifest
+when you need a file.
 
 Tightbeam's `--files-json` accepts file paths. Raw Agent reply uses `--file`
 for a path or `--file-id` for an upload handle. Preserve failed attachments
@@ -121,6 +132,11 @@ row with `messageId` and `effect`; a warning has `effect: "unchanged"` and
 check the registered recipient before acting. Use the server item ID for raw
 Agent `--supersedes`. A Tightbeam send UUID is a valid Progress `--request`
 alias.
+
+If the intended operation is definitively unavailable, use a supported
+alternative only if its effects meet the task and you already have authority
+for that action. Explain the substitution in the message and report the gap to
+the Harklight owner. Resolve an uncertain original operation before choosing an alternative.
 
 Raw Agent revision can optionally correlate to a person chat entry on the item
 at its current request revision. Success returns the message and acted entry;
@@ -244,7 +260,56 @@ not mean Seen, handed or acted.
 on attached content is the download ID; downloading by upload handle fails.
 Revise's same-item reuse is the specific exception described above.
 
-## Handle a delivered change
+## Handle a delivered Chat or answer
+
+Use the handle, item ID and delivered event ID from the Tightbeam wake.
+`tightbeam harklight-read --handle "$HARKLIGHT_HANDLE"` reads entries
+delivered to your session. Acknowledge a person Chat or answer in its
+originating Tightbeam session:
+
+```sh
+tightbeam harklight-ack --handle "$HARKLIGHT_HANDLE" --event "$HARKLIGHT_EVENT"
+```
+
+For person Chat, reply on the same event. A later Chat is a separate entry,
+including after an answer. Keep its own event ID:
+
+```sh
+tightbeam harklight-reply --handle "$HARKLIGHT_HANDLE" \
+  --request "$HARKLIGHT_ITEM" --in-reply-to "$HARKLIGHT_EVENT" \
+  --body "The request is complete."
+```
+
+For an answer or Seen event, report the actual result:
+
+```sh
+tightbeam harklight-result --handle "$HARKLIGHT_HANDLE" \
+  --request "$HARKLIGHT_ITEM" --in-reply-to "$HARKLIGHT_EVENT" \
+  --status received
+```
+
+Use `applied` when the requested effect is established, `refused` when it
+cannot be applied, and `received` to confirm receipt while the effect remains
+unresolved or when no action was requested. Acknowledgment records handoff.
+Conversation discussion does not grant authority for a new action. Native
+commands take the delivered Tightbeam event ID. A raw Server entry ID or
+feed revision is a different identifier.
+
+If a native reply or result is uncertain, retry that same command with its
+unchanged inputs and original `--op-id`. If an older Server definitively
+refuses a late Chat reply because the conversation is closed, use a new
+Tightbeam Harklight send only if you already have authority for that contact.
+Keep the original refusal with the delivered event.
+
+Closed lifecycle notices can be read without acknowledgment. If the gateway
+reports a paused or held feed, use
+`tightbeam harklight-retry --session "$HARKLIGHT_HANDLE"` and read its
+outcome. Escalate repeated feed failures with the recorded diagnostic.
+
+## Handle a standalone Agent delivery
+
+Use the raw commands in this section for separately authorized standalone
+operations. For a Tightbeam wake, use the native commands above.
 
 The source wake prompt starts with JSON; a notice batch may wrap it. These
 excerpts show the snake_case fields used for a chat and an answer:
@@ -392,25 +457,12 @@ on stderr and keeps the checkpoint at its last completed output. `listen`
 retries from that position across transient 503, id-less `closing` events for
 `storage_unavailable` and incomplete frames; none of those advances the cursor.
 
-A batch `500 internal_error` or id-less `closing internal_error` instead stops
-the feed with exit 1. `listen` and `focus --follow` print a pause diagnostic
-on stderr with the operation, token and Request-Id. Stdout retains only complete
-feed records; the error adds no cursor. SSE Request-Id comes from the
-stream-opening response header, with no cursor or event fallback. Keep the last
-consumer-committed cursor and do not restart automatically. An explicit new raw
-invocation resumes from that cursor.
-
-For Tightbeam-managed feeds, a “Live updates paused” notice requires explicit
-resume through the registered handle:
-
-```sh
-tightbeam harklight-retry --session "$HARKLIGHT_HANDLE"
-```
-
-The pause survives Gateway restart and follower reconciliation. Resume uses
-Tightbeam's last durable checkpoint or rebuilds the baseline if none exists.
-An incomplete snapshot remains provisional. If the internal error returns,
-the feed pauses again; transient 503 recovery remains automatic.
+On Agent 0.2.3, a one-shot read of a batch `500 internal_error` failed
+with a diagnostic. A followed read reconnected, and the tested Tightbeam
+gateway did not create a durable pause. Use the installed Agent's outcome
+and last completed checkpoint to decide recovery. For Tightbeam-managed
+feeds, use `tightbeam harklight-retry --session` when the gateway reports
+a paused or held route. Escalate repeated failures with the diagnostic.
 
 Advisories retain their subtype payload; not every advisory has text. Use
 `advisory-ack --item-id ID --advisory-id ID` for acknowledgment. Session end
