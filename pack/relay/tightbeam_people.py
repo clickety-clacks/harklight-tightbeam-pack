@@ -6,6 +6,13 @@ import json
 import subprocess
 
 
+class TightbeamRefusal(RuntimeError):
+    def __init__(self, command: str, status: int, error: dict):
+        super().__init__(f"Tightbeam {command} refused ({error['code']})")
+        self.status = status
+        self.error = error
+
+
 class TightbeamPeople:
     def call(self, command: str, payload: dict) -> dict | None:
         result = subprocess.run(
@@ -15,16 +22,21 @@ class TightbeamPeople:
             timeout=30,
         )
         if result.returncode:
-            if command == "people-lookup":
-                for line in result.stderr.splitlines():
-                    try:
-                        response = json.loads(line)
-                    except ValueError:
-                        continue
-                    if (isinstance(response, dict) and response.get("httpStatus") == 404
-                            and isinstance(response.get("error"), dict)
-                            and response["error"].get("code") == "not_found"):
-                        return None
+            for line in result.stderr.splitlines():
+                try:
+                    response = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(response, dict):
+                    continue
+                status = response.get("httpStatus")
+                error = response.get("error")
+                if (type(status) is not int or not 400 <= status < 500
+                        or not isinstance(error, dict) or not isinstance(error.get("code"), str)):
+                    continue
+                if command == "people-lookup" and status == 404 and error["code"] == "not_found":
+                    return None
+                raise TightbeamRefusal(command, status, error)
             raise RuntimeError(f"Tightbeam {command} exited {result.returncode}")
         return json.loads(result.stdout)
 

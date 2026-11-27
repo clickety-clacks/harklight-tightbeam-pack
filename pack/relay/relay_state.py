@@ -56,6 +56,16 @@ class RelayState:
                         event TEXT NOT NULL
                     )
                 """)
+                self.db.execute("""
+                    CREATE TABLE IF NOT EXISTS refused_events (
+                        event_key TEXT PRIMARY KEY,
+                        event TEXT NOT NULL,
+                        checkpoint TEXT NOT NULL,
+                        status INTEGER NOT NULL,
+                        error TEXT NOT NULL,
+                        later_bound_revision INTEGER NOT NULL
+                    )
+                """)
                 self.db.execute(
                     "INSERT OR IGNORE INTO feed (singleton, connection, sender, session_id) VALUES (1, ?, ?, ?)",
                     (connection, sender, str(uuid.uuid4())),
@@ -148,9 +158,7 @@ class RelayState:
         with self.db:
             if receipt is not None:
                 event = receipt["event"]
-                key = json.dumps([event[field] for field in (
-                    "server_id", "remote_conversation_id", "kind", "event_id"
-                )])
+                key = self.event_key(event)
                 self.db.execute(
                     "INSERT OR IGNORE INTO receipts VALUES (?, ?, ?)",
                     (key, receipt["receipt_id"], json.dumps(event)),
@@ -204,3 +212,26 @@ class RelayState:
         return self.db.execute(
             "SELECT 1 FROM writes WHERE result IS NULL AND json_extract(request, '$.kind') = 'send' LIMIT 1"
         ).fetchone() is not None
+
+    @staticmethod
+    def event_key(event: dict) -> str:
+        return json.dumps([event[field] for field in (
+            "server_id", "remote_conversation_id", "kind", "event_id"
+        )])
+
+    def was_refused(self, event: dict) -> bool:
+        return self.db.execute(
+            "SELECT 1 FROM refused_events WHERE event_key = ?", (self.event_key(event),)
+        ).fetchone() is not None
+
+    def refuse_event(self, pending: dict, status: int, error: dict, later_revision: int) -> None:
+        event = pending["event"]
+        checkpoint = json.dumps(pending["checkpoint"])
+        with self.db:
+            self.db.execute(
+                "INSERT OR IGNORE INTO refused_events VALUES (?, ?, ?, ?, ?, ?)",
+                (self.event_key(event), json.dumps(event), checkpoint, status,
+                 json.dumps(error), later_revision),
+            )
+            self.db.execute("DELETE FROM events WHERE singleton = 1")
+            self.db.execute("UPDATE feed SET checkpoint = ?", (checkpoint,))

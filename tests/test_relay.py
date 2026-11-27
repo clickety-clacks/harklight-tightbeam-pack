@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -8,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pack" / "relay"))
 from addresses import Addresses
 from relay import Relay
 from relay_state import RelayState
+from tightbeam_people import TightbeamRefusal
 
 
 SEND = {
@@ -250,3 +252,62 @@ class RelayTests(unittest.TestCase):
             relay.inbound()
         self.assertEqual(self.people.events, [])
         self.assertIsNone(relay.state.checkpoint())
+
+    def test_refused_revision_gap_retains_event_and_allows_following_chat_once(self):
+        relay = self.relay({"reader": "person-1"})
+        relay.outbound()
+        skipped = {**ANSWER, "data": {**ANSWER["data"], "request_revision": 2}}
+        chat = {"kind": "entry", "data": {
+            "item_id": "shared-item", "shared_entry_id": "chat-3", "author": "person",
+            "request_revision": 3, "text": "Deliver",
+            "speaker": {"kind": "person", "id": "person-1", "display_name": "Reader"},
+        }}
+        self.people.lookup = lambda *_: {"revisions": [{"remote_revision": 1}, {"remote_revision": 3}]}
+
+        accepted = self.people.event
+        attempted = []
+
+        def refuse_gap(event):
+            attempted.append(event["event_id"])
+            if event["remote_revision"] == 2:
+                raise TightbeamRefusal("people-event", 404, {
+                    "code": "revision_unbound", "message": "No accepted report",
+                })
+            if not any(old["event_id"] == event["event_id"] for old in self.people.events):
+                accepted(event)
+
+        self.people.event = refuse_gap
+        self.agent.changes = lambda _: (
+            ("service", row, {"rev": rev}) for row, rev in [(skipped, 20), (chat, 21)]
+        )
+        relay.inbound()
+        self.assertEqual(relay.state.checkpoint(), {"rev": 21})
+        restarted = self.relay({"new-reader": "person-1"})
+        restarted.inbound()
+        row = restarted.state.db.execute("SELECT * FROM refused_events").fetchone()
+        self.assertEqual(row["later_bound_revision"], 3)
+        self.assertEqual(json.loads(row["event"])["speaker"]["address"], "user:reader")
+        self.assertEqual(json.loads(row["error"])["code"], "revision_unbound")
+        self.assertEqual(len(restarted.state.receipts()), 1)
+        self.assertEqual(len(self.people.events), 1)
+        self.assertEqual(attempted.count("answer-1"), 1)
+
+    def test_pending_unbound_event_is_held_when_a_later_report_could_bind_it(self):
+        relay = self.relay({"reader": "person-1"})
+        relay.state.advance({"rev": 19})
+        pending = {
+            "event": {"server_id": "service", "remote_conversation_id": "shared-item",
+                      "kind": "answer", "event_id": "future", "remote_revision": 2},
+            "checkpoint": {"rev": 20}, "receipt_id": None,
+        }
+        relay.state.prepare_event(pending)
+
+        def refuse(_):
+            raise TightbeamRefusal("people-event", 404, {"code": "revision_unbound"})
+
+        self.people.event = refuse
+        with self.assertRaises(TightbeamRefusal):
+            relay.inbound()
+        self.assertEqual(relay.state.pending_event(), pending)
+        self.assertEqual(relay.state.checkpoint(), {"rev": 19})
+        self.assertIsNone(relay.state.db.execute("SELECT 1 FROM refused_events").fetchone())

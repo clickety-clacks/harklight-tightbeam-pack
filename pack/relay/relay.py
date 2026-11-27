@@ -17,7 +17,7 @@ from harklight_agent import HarklightAgent
 from outgoing import delivery_outcomes, prepare_send
 from projection import event_for
 from relay_state import RelayState
-from tightbeam_people import TightbeamPeople
+from tightbeam_people import TightbeamPeople, TightbeamRefusal
 
 
 class Relay:
@@ -131,7 +131,25 @@ class Relay:
         if pending is None:
             return
         event = pending["event"]
-        self.people.event(event)
+        if self.state.was_refused(event):
+            self.state.complete_event(pending["checkpoint"])
+            return
+        try:
+            self.people.event(event)
+        except TightbeamRefusal as refusal:
+            if refusal.error["code"] != "revision_unbound":
+                raise
+            binding = self.people.lookup(event["server_id"], event["remote_conversation_id"])
+            bound = self.bound_revisions(binding)
+            revision = event["remote_revision"]
+            # R4 only admits strictly increasing revision bindings. A gap
+            # behind an accepted report cannot be filled by a later report.
+            if revision in bound or not any(later > revision for later in bound):
+                raise
+            self.state.refuse_event(pending, refusal.status, refusal.error, max(bound))
+            print("Harklight people relay: retained a refused event for an unbindable revision",
+                  file=sys.stderr)
+            return
         receipt = pending if pending["receipt_id"] is not None else None
         self.state.complete_event(pending["checkpoint"], receipt)
 
@@ -146,6 +164,15 @@ class Relay:
             self.state.complete_receipt(receipt["event_key"])
         if failed:
             raise RuntimeError("One or more Harklight receipts are pending retry")
+
+    @staticmethod
+    def bound_revisions(binding: dict | None) -> set[int]:
+        if binding is None:
+            return set()
+        revisions = {entry["remote_revision"] for entry in binding["revisions"]}
+        if any(type(revision) is not int or revision < 1 for revision in revisions):
+            raise ValueError("Tightbeam returned invalid remote revision bindings")
+        return revisions
 
     def inbound(self) -> None:
         self.accept_pending()
@@ -175,12 +202,12 @@ class Relay:
                 ):
                     held.add(item_id)
                     continue
-                if binding is not None and not any(
-                    revision["remote_revision"] == event["remote_revision"]
-                    for revision in binding["revisions"]
-                ):
-                    held.add(item_id)
-                    continue
+                if binding is not None:
+                    bound = self.bound_revisions(binding)
+                    revision = event["remote_revision"]
+                    if revision not in bound and not any(later > revision for later in bound):
+                        held.add(item_id)
+                        continue
             if held:
                 checkpoint = self.state.checkpoint()
             if event and binding is not None:
