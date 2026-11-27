@@ -10,6 +10,12 @@ This release uses Harklight protocol 0.2 only. It supports Harklight Server
 0.2 series when using the web client. It requires Tightbeam's protocol 0.2
 Harklight integration. iOS release compatibility is unverified.
 
+Compatible with Tightbeam: None verified.
+
+### Breaking changes
+
+None since v0.2.0.
+
 ## v0.2.0
 
 The pack now uses Harklight protocol 0.2 only. It documents the current

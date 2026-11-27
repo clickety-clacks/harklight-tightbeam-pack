@@ -5,6 +5,7 @@ import io
 import json
 import os
 import sys
+from subprocess import CompletedProcess
 import tarfile
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ sys.path.insert(0, str(ROOT / "bin"))
 import harklight_pack
 import privacy_check
 import release as release_tool
+import release_checks
 import sync_from_installation
 
 
@@ -575,6 +577,10 @@ class ApplyTests(unittest.TestCase):
                 "#!/usr/bin/env python3\n"
                 "import os, pathlib, sys\n"
                 "args=sys.argv[1:]\n"
+                "if args == ['--help']:\n"
+                "    print('  identity edit <archetype> [--manifest | --skill <name>]')\n"
+                "    print('                [--file <path>]')\n"
+                "    sys.exit(0)\n"
                 "base=pathlib.Path(os.environ['TIGHTBEAM_BASE_DIR'])\n"
                 "identity=base/'identity'\n"
                 "role=args[2]\n"
@@ -739,14 +745,24 @@ class ReleaseFetchTests(unittest.TestCase):
 
             def fake_run(args: list[str]) -> str:
                 commands.append(args)
+                if args[:3] == ["gh", "release", "view"]:
+                    return json.dumps({"tagName": "v0.9.0", "body": "Previous notes."})
                 return "main" if args[:3] == ["git", "branch", "--show-current"] else ""
 
             with (
                 patch.object(release_tool, "ROOT", root),
                 patch.object(release_tool, "_previous_version", return_value="0.9.0"),
-                patch.object(release_tool, "_release_notes", return_value="Release notes."),
+                patch.object(
+                    release_tool,
+                    "_release_notes",
+                    return_value="Compatible with Tightbeam: 0.1.16, 0.1.17+5501\n"
+                    "\n### Breaking changes\n\nNone.\n",
+                ),
                 patch.object(release_tool, "private_terms_from_environment", return_value=[]),
                 patch.object(release_tool, "scan_repository", return_value=[]),
+                patch.object(release_tool, "_require_breaking_changes_review"),
+                patch.object(release_tool, "tested_versions", return_value=("0.1.16", "0.1.17+5501")),
+                patch.object(release_tool, "breaking_signals", return_value=[]),
                 patch.object(release_tool, "_build_assets", return_value=tuple(assets)),
                 patch.object(release_tool, "_run", side_effect=fake_run),
                 patch.dict(
@@ -780,15 +796,111 @@ class ReleaseFetchTests(unittest.TestCase):
                 self.assertEqual(release_tool.main(), 0)
             build_assets.assert_not_called()
 
-    def test_release_without_changelog_entry_uses_default_notes(self) -> None:
+    def test_release_requires_fresh_independent_breaking_changes_approval(self) -> None:
+        head = "b" * 40
+        pull = {
+            "number": 12, "merged_at": "present", "merge_commit_sha": "release",
+            "base": {"ref": "main"}, "head": {"sha": head}, "user": {"id": 1},
+        }
+        approval = {
+            "id": 1, "state": "APPROVED", "commit_id": head, "user": {"id": 2},
+            "author_association": "MEMBER", "body": "Breaking changes confirmed.",
+        }
+
+        def verify(reviews, released_blob="same"):
+            def fake_run(args):
+                if "/commits/" in args[-1]:
+                    return json.dumps([pull])
+                if "/reviews?" in args[-1]:
+                    return json.dumps([reviews])
+                return "same" if args[-1].startswith(head + ":") else released_blob
+
+            with patch.object(release_tool, "_run", side_effect=fake_run):
+                release_tool._require_breaking_changes_review("release")
+
+        verify([approval])
+        for reviews in (
+            [],
+            [{**approval, "commit_id": "stale"}],
+            [{**approval, "user": {"id": 1}}],
+            [{**approval, "body": "Approved."}],
+            [approval, {**approval, "id": 2, "state": "DISMISSED"}],
+        ):
+            with self.subTest(reviews=reviews), self.assertRaisesRegex(RuntimeError, "independent"):
+                verify(reviews)
+        with self.assertRaisesRegex(RuntimeError, "reviewed PR"):
+            verify([approval], released_blob="modified")
+
+    def test_release_detects_removed_pack_contract(self) -> None:
+        previous_installer = (
+            'SKILL_NAME = "harklight-agent"\n'
+            'SKILL_MARKER = "managed"\n'
+            'ELECTION_MARKER = "elected"\n'
+            'GUIDANCE_BEGIN_PREFIX = "begin"\n'
+            'GUIDANCE_END = "end"\n'
+            'parser.add_argument("--source-dir")\n'
+        )
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
-            with patch.object(release_tool, "ROOT", root):
-                self.assertEqual(
-                    release_tool._release_notes("1.0.0"),
-                    "Harklight for Tightbeam v1.0.0\n",
+            (root / "bin").mkdir()
+            (root / "pack").mkdir()
+            (root / "bin/harklight_pack.py").write_text("", encoding="utf-8")
+            (root / "pack/elections.json").write_text('{"roles": ["coder"]}', encoding="utf-8")
+
+            def read_previous(args, **kwargs):
+                content = (
+                    previous_installer
+                    if args[-1].endswith(":bin/harklight_pack.py")
+                    else '{"roles": ["coder", "reviewer"]}'
                 )
+                return CompletedProcess(args, 0, content)
+
+            with patch.object(release_checks.subprocess, "run", side_effect=read_previous):
+                signals = release_checks.breaking_signals(
+                    root, "0.2.1", "Compatible with Tightbeam: 0.1.15, 0.1.16", ("0.1.16",)
+                )
+        self.assertCountEqual(signals, [
+            "SKILL_NAME harklight-agent", "SKILL_MARKER managed", "ELECTION_MARKER elected",
+            "GUIDANCE_BEGIN_PREFIX begin", "GUIDANCE_END end", "flag --source-dir",
+            "pack election for reviewer", "verified Tightbeam version 0.1.15",
+        ])
+
+    def test_release_rejects_missing_or_incomplete_notes(self) -> None:
+        compatibility = "Compatible with Tightbeam: None verified.\n"
+        breaking = "### Breaking changes\n\nNone.\n"
+        cases = [
+            ("", "executed runtime cases"),
+            (breaking, "executed runtime cases"),
+            ("Compatible with Tightbeam: 0.1.x\n" + breaking, "executed runtime cases"),
+            (compatibility, "Breaking changes"),
+            (compatibility + "### Breaking changes\n\n### Other\nText.\n", "Breaking changes"),
+        ]
+        for notes, error in cases:
+            with self.subTest(notes=notes):
+                with self.assertRaisesRegex(RuntimeError, error):
+                    release_tool._validate_release_notes(notes, (), [])
+        release_tool._validate_release_notes(compatibility + breaking, (), [])
+        self.assertEqual(
+            release_tool._validate_release_notes(
+                "Compatible with Tightbeam: From release tests.\n" + breaking,
+                ("0.1.15", "0.1.16"), [],
+            ),
+            "Compatible with Tightbeam: 0.1.15, 0.1.16\n" + breaking,
+        )
+        with self.assertRaisesRegex(RuntimeError, "executed runtime cases"):
+            release_tool._validate_release_notes(compatibility + breaking, ("0.1.16",), [])
+        for placeholder in ("None.", "Nothing.", "N/A", "- **None.**", "TBD"):
+            with self.subTest(placeholder=placeholder), self.assertRaisesRegex(
+                RuntimeError, "flag --source-dir"
+            ):
+                release_tool._validate_release_notes(
+                    compatibility + "### Breaking changes\n\n" + placeholder,
+                    (), ["flag --source-dir"],
+                )
+        release_tool._validate_release_notes(
+            compatibility + "### Breaking changes\n\nRemoved --source-dir.\n",
+            (), ["flag --source-dir"],
+        )
 
     def test_update_download_checks_archive_checksum(self) -> None:
         archive_buffer = io.BytesIO()

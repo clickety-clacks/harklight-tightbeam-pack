@@ -14,6 +14,8 @@ import tarfile
 from pathlib import Path
 
 from privacy_check import private_terms_from_environment, scan_repository
+from release_checks import breaking_signals
+from runtime_compat import tested_versions
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +65,109 @@ def _release_notes(version: str) -> str:
     return f"Harklight for Tightbeam v{version}\n\n{match.group(1).strip()}\n"
 
 
+def _validate_release_notes(
+    notes: str, verified: tuple[str, ...], signals: list[str]
+) -> str:
+    expected = "Compatible with Tightbeam: " + (", ".join(verified) or "None verified.")
+    declarations = re.findall(r"^Compatible with Tightbeam:.*$", notes, re.M)
+    if declarations == ["Compatible with Tightbeam: From release tests."] and verified:
+        notes = notes.replace(declarations[0], expected, 1)
+    elif declarations != [expected]:
+        raise RuntimeError(f"release notes must match executed runtime cases: {expected}")
+    sections = re.split(r"(?m)^#{1,6}[ \t]+", notes)
+    breaking = [
+        body.strip()
+        for heading, _, body in (section.partition("\n") for section in sections[1:])
+        if heading.strip() == "Breaking changes"
+    ]
+    if len(breaking) != 1 or not breaking[0]:
+        raise RuntimeError("release notes require one nonempty Breaking changes section")
+    if signals:
+        entries = [
+            line.strip(" \t-+*`.")
+            for line in breaking[0].splitlines()
+            if line.strip()
+        ]
+        placeholder = r"(?i)^(?:none\b|nothing\b|no\s+(?:breaking\b|changes\b)|n/?a\b|tbd\b)"
+        if not entries or any(not entry or re.match(placeholder, entry) for entry in entries):
+            raise RuntimeError("document detected breaking changes: " + ", ".join(signals))
+    return notes
+
+
+def _checked_release_notes(current: str, verified: tuple[str, ...]) -> str:
+    verified = tuple(version.removeprefix("v") for version in verified)
+    if len(verified) != 2 or len(set(verified)) != 2:
+        raise RuntimeError("release requires two distinct verified Tightbeam versions")
+    published = json.loads(_run(["gh", "release", "view", "--json", "tagName,body"]))
+    tag = published["tagName"]
+    if not tag.startswith("v") or _version(tag[1:]) is None:
+        raise RuntimeError("the previous published pack tag is invalid")
+    if tag == f"v{current}":
+        raise RuntimeError("this pack version is already published")
+    signals = breaking_signals(ROOT, tag[1:], published["body"], verified)
+    if signals:
+        print("Breaking change signals: " + ", ".join(signals))
+    return _validate_release_notes(_release_notes(current), verified, signals)
+
+
+def _preview_release_notes(result_path: Path) -> int:
+    try:
+        current = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        if current == _previous_version():
+            print("no versioned pack release is required")
+            return 0
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        _checked_release_notes(current, tuple(result["compatible_with_tightbeam"]))
+        return 0
+    except (KeyError, OSError, ValueError, RuntimeError) as error:
+        print(f"release notes check refused: {error}", file=sys.stderr)
+        return 1
+
+
+def _require_breaking_changes_review(target: str) -> None:
+    endpoint = "repos/{owner}/{repo}"
+    pulls = json.loads(_run(["gh", "api", f"{endpoint}/commits/{target}/pulls"]))
+    matching = [
+        pull for pull in pulls
+        if pull["merged_at"] and pull["merge_commit_sha"] == target
+        and pull["base"]["ref"] == "main"
+    ]
+    if len(matching) != 1:
+        raise RuntimeError("the release commit must come from one merged main pull request")
+    pull = matching[0]
+    head = pull["head"]["sha"]
+    number = pull["number"]
+    if not re.fullmatch(r"[0-9a-fA-F]{40,64}", head):
+        raise RuntimeError("the reviewed PR head is not a commit SHA")
+    _run(["git", "fetch", "--no-tags", "origin", head])
+    for path in ("VERSION", "CHANGELOG.md"):
+        reviewed = _run(["git", "rev-parse", f"{head}:{path}"])
+        released = _run(["git", "rev-parse", f"{target}:{path}"])
+        if reviewed != released:
+            raise RuntimeError("the released version and changelog must match the reviewed PR")
+
+    pages = json.loads(_run([
+        "gh", "api", "--paginate", "--slurp",
+        f"{endpoint}/pulls/{number}/reviews?per_page=100",
+    ]))
+    latest = {}
+    for review in sorted((review for page in pages for review in page), key=lambda row: row["id"]):
+        if review["state"] in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            latest[review["user"]["id"]] = review
+    if not any(
+        review["state"] == "APPROVED"
+        and review["commit_id"] == head
+        and review["user"]["id"] != pull["user"]["id"]
+        and review["author_association"] in {"OWNER", "MEMBER", "COLLABORATOR"}
+        and "Breaking changes confirmed." in (review.get("body") or "").splitlines()
+        for review in latest.values()
+    ):
+        raise RuntimeError(
+            "release requires an independent PR approval on its final head "
+            "containing the line 'Breaking changes confirmed.'"
+        )
+
+
 def _build_assets(version: str) -> tuple[Path, Path, Path]:
     pack_dir = ROOT / "pack"
     required = [
@@ -108,13 +213,7 @@ def main() -> int:
         if parsed is None or current == previous:
             print("no versioned pack release is required")
             return 0
-        notes = _release_notes(current)
         terms = private_terms_from_environment()
-        findings = scan_repository(
-            ROOT, terms, extra_texts={"release notes": notes}
-        )
-        if findings:
-            raise RuntimeError("privacy check failed before release publication")
         policy = json.loads((ROOT / "sync-policy.json").read_text(encoding="utf-8"))
         release_policy = policy.get("release_policy")
         if release_policy not in {"manual", "auto"}:
@@ -133,6 +232,10 @@ def main() -> int:
         )
         if not re.fullmatch(r"[0-9a-fA-F]{40,64}", target):
             raise RuntimeError("the release target is not a commit SHA")
+        _require_breaking_changes_review(target)
+        notes = _checked_release_notes(current, tested_versions(ROOT))
+        if scan_repository(ROOT, terms, extra_texts={"release notes": notes}):
+            raise RuntimeError("privacy check failed before release publication")
         archive, script, sums = _build_assets(current)
         tag = f"v{current}"
         title = f"Harklight for Tightbeam {tag}"
@@ -161,4 +264,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--preview":
+        raise SystemExit(_preview_release_notes(Path(sys.argv[2])))
     raise SystemExit(main())

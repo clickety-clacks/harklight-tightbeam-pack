@@ -108,6 +108,28 @@ release. A release workflow dispatch on main also publishes the current
 version. Setting release_policy to manual stops publication from a push. Both
 paths run the same privacy checks.
 
+The support window is the current full Tightbeam release and the preceding
+full release. Publication applies the pack twice through the real identity-edit CLI of each
+exact published Linux x86_64 build. It checks the skill, guidance, elections,
+and that the repeated apply leaves the identity unchanged. This check covers
+pack installation and does not exercise Harklight traffic.
+Each version's changelog entry needs a `Compatible with Tightbeam:` line
+matching the two tested versions in lexicographic order. Use
+`Compatible with Tightbeam: From release tests.` to fill the line from CI.
+Fixture-only unit tests do not count. Outside this window, the installer checks the CLI's
+identity-edit capabilities before attempting writes.
+
+Include a `### Breaking changes` section. The publication step detects removed
+or renamed installer actions, flags, literal output prefixes, and environment
+keys, changes to the managed skill name and identity markers, and removed
+role elections or verified Tightbeam versions. An independent repository
+reviewer checks those signals and semantic changes such as flag behavior or
+response meaning. They approve the final release PR head in GitHub with
+`Breaking changes confirmed.` on its own line in the approval. Publication
+requires that approval and checks that the merged version and changelog
+match the reviewed files. If approval is missing, approve the exact release
+PR and rerun the failed release workflow.
+
 ## Privacy checks
 
 Configure the repository Actions secret HARKLIGHT_PACK_PRIVATE_TERMS before
