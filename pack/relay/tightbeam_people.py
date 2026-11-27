@@ -40,6 +40,11 @@ class TightbeamPeople:
             raise RuntimeError(f"Tightbeam {command} exited {result.returncode}")
         return json.loads(result.stdout)
 
+    @staticmethod
+    def wait_args() -> list[str]:
+        return ["tightbeam", "people-wait", "--json",
+                json.dumps({"limit": 50, "timeout_ms": 15000})]
+
     def collect(self) -> list[dict]:
         return self.call("people-collect", {"limit": 100})["records"]
 

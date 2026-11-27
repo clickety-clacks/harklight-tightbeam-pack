@@ -7,6 +7,7 @@ import fcntl
 import json
 from pathlib import Path
 import sqlite3
+import signal
 import subprocess
 import sys
 import uuid
@@ -17,6 +18,7 @@ from harklight_agent import HarklightAgent
 from outgoing import delivery_outcomes, prepare_send
 from projection import event_for
 from relay_state import RelayState
+from relay_watch import RelayWatch
 from tightbeam_people import TightbeamPeople, TightbeamRefusal
 
 
@@ -106,7 +108,7 @@ class Relay:
             result = json.loads(row["result"])
         self.report(result)
 
-    def outbound(self) -> None:
+    def outbound(self) -> bool:
         attempted = set()
         errors = []
         for result in self.state.unreported():
@@ -116,7 +118,8 @@ class Relay:
             except (KeyError, TypeError, OSError, ValueError, RuntimeError,
                     subprocess.SubprocessError) as error:
                 errors.append(error)
-        for record in self.people.collect():
+        records = self.people.collect()
+        for record in records:
             if record["id"] not in attempted:
                 try:
                     self.deliver_record(record)
@@ -125,6 +128,7 @@ class Relay:
                     errors.append(error)
         if errors:
             raise errors[0]
+        return bool(records)
 
     def accept_pending(self) -> None:
         pending = self.state.pending_event()
@@ -174,43 +178,23 @@ class Relay:
             raise ValueError("Tightbeam returned invalid remote revision bindings")
         return revisions
 
-    def inbound(self) -> None:
-        self.accept_pending()
-        held = set()
-        for server_id, change, checkpoint in self.agent.changes(self.state.checkpoint()):
-            item_id = change.get("data", {}).get("item_id") if change is not None else None
-            if item_id is not None and (
-                item_id in held or self.state.binding_unreported(server_id, item_id)
+    def apply_change(self, server_id: str, change: dict | None, checkpoint) -> bool:
+        """Return false if the feed must hold this position for another attempt."""
+        item_id = change.get("data", {}).get("item_id") if change is not None else None
+        if item_id is not None and self.state.binding_unreported(server_id, item_id):
+            return False
+        event = event_for(server_id, change, self.addresses) if change is not None else None
+        if event:
+            binding = self.people.lookup(server_id, item_id)
+            if binding is None and (
+                self.state.owns(server_id, item_id) or self.state.has_unresolved_send()
             ):
-                held.add(item_id)
-                continue
-            try:
-                event = event_for(server_id, change, self.addresses) if change is not None else None
-            except (KeyError, TypeError, ValueError):
-                if item_id is None:
-                    raise
-                held.add(item_id)
-                continue
-            if event:
-                try:
-                    binding = self.people.lookup(server_id, item_id)
-                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-                    held.add(item_id)
-                    continue
-                if binding is None and (
-                    self.state.owns(server_id, item_id) or self.state.has_unresolved_send()
-                ):
-                    held.add(item_id)
-                    continue
-                if binding is not None:
-                    bound = self.bound_revisions(binding)
-                    revision = event["remote_revision"]
-                    if revision not in bound and not any(later > revision for later in bound):
-                        held.add(item_id)
-                        continue
-            if held:
-                checkpoint = self.state.checkpoint()
-            if event and binding is not None:
+                return False
+            if binding is not None:
+                bound = self.bound_revisions(binding)
+                revision = event["remote_revision"]
+                if revision not in bound and not any(later > revision for later in bound):
+                    return False
                 self.state.prepare_event({
                     "event": event,
                     "checkpoint": checkpoint,
@@ -220,8 +204,27 @@ class Relay:
                     ),
                 })
                 self.accept_pending()
-            else:
-                self.state.advance(checkpoint)
+                return True
+        self.state.advance(checkpoint)
+        return True
+
+    def inbound(self) -> None:
+        self.accept_pending()
+        held = set()
+        for server_id, change, checkpoint in self.agent.changes(self.state.checkpoint()):
+            item_id = change.get("data", {}).get("item_id") if change is not None else None
+            if item_id is not None and item_id in held:
+                continue
+            if held:
+                checkpoint = self.state.checkpoint()
+            try:
+                applied = self.apply_change(server_id, change, checkpoint)
+            except (KeyError, TypeError, OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                if item_id is None or self.state.pending_event() is not None:
+                    raise
+                applied = False
+            if not applied:
+                held.add(item_id)
         if held:
             raise RuntimeError("One or more Harklight events are waiting for a valid payload or send report")
 
@@ -230,6 +233,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--state-dir", type=Path, required=True)
+    parser.add_argument("--watch", action="store_true", help="supervise the live relay")
     args = parser.parse_args()
     try:
         config = json.loads(args.config.read_text(encoding="utf-8"))
@@ -244,11 +248,17 @@ def main() -> int:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                return 0
+                raise RuntimeError("another relay already owns this state directory") from None
             state = RelayState(args.state_dir / "relay.db", connection, sender)
             try:
                 agent = HarklightAgent(AgentCLI(connection, args.state_dir / "agent"), sender, state)
                 relay = Relay(state, addresses, TightbeamPeople(), agent)
+                if args.watch:
+                    def stop(_signal, _frame):
+                        raise SystemExit(0)
+                    signal.signal(signal.SIGTERM, stop)
+                    RelayWatch(relay).run()
+                    return 0
                 failures = []
                 for action in (relay.outbound, relay.inbound, relay.receipts):
                     try:

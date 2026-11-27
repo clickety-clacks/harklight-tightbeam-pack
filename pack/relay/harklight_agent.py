@@ -110,6 +110,13 @@ class HarklightAgent:
         if result["kind"] != "committed":
             print("Harklight refused a receipt for an accepted event", file=sys.stderr)
 
+    def follow_args(self, checkpoint: dict) -> list[str]:
+        return [
+            *self.cli.argv, "listen", "--follow", "--shared", "--session", self.session, "--ack2",
+            "--after", str(checkpoint["rev"]), "--continuation", checkpoint["continuation"],
+            "--on-expired", "exit",
+        ]
+
     def changes(self, checkpoint: dict | None):
         if not self.shared:
             return
